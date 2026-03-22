@@ -29,16 +29,19 @@ const server = createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
   res.end(`<!DOCTYPE html><html><head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>TRAID CRM — QR</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
     <style>
-      body{background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;padding:40px}
-      h1{color:#7c3aed} h2{color:#a78bfa}
-      #status{color:#888;margin-bottom:20px}
-      .qr-box{margin:30px;text-align:center;background:#1a1a1a;padding:30px;border-radius:12px}
+      body{background:#fff;color:#222;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;padding:20px}
+      h1{color:#7c3aed;font-size:1.3em}
+      #status{color:#666;margin-bottom:10px}
+      .qr-box{margin:15px;text-align:center}
+      .qr-box h2{font-size:1em;color:#333;margin-bottom:8px}
+      canvas{border:4px solid #000;border-radius:8px}
     </style>
   </head><body>
-    <h1>TRAID CRM — Vincular WhatsApp</h1>
+    <h1>TRAID CRM</h1>
     <p id="status">Cargando...</p>
     <div id="qrs"></div>
     <script>
@@ -51,10 +54,10 @@ const server = createServer((req, res) => {
           const status = document.getElementById('status');
           if (keys.length === 0) {
             status.textContent = 'Todas las sesiones conectadas';
-            status.style.color = '#4ade80';
+            status.style.color = '#16a34a';
             container.innerHTML = '';
           } else {
-            status.textContent = 'Escaneá cada QR con WhatsApp > Dispositivos vinculados';
+            status.textContent = 'Escaneá con WhatsApp > Dispositivos vinculados';
             keys.forEach(name => {
               if (!rendered[name] || rendered[name] !== data[name]) {
                 rendered[name] = data[name];
@@ -63,19 +66,18 @@ const server = createServer((req, res) => {
                   box = document.createElement('div');
                   box.id = 'box-' + name;
                   box.className = 'qr-box';
-                  box.innerHTML = '<h2>' + name.toUpperCase() + '</h2><div id="qr-' + name + '"></div>';
+                  box.innerHTML = '<h2>' + name.toUpperCase() + '</h2><canvas id="cv-' + name + '"></canvas>';
                   container.appendChild(box);
-                } else {
-                  document.getElementById('qr-' + name).innerHTML = '';
                 }
-                new QRCode(document.getElementById('qr-' + name), {text: data[name], width: 200, height: 200});
+                const cv = document.getElementById('cv-' + name);
+                QRCode.toCanvas(cv, data[name], {width:250,margin:2,errorCorrectionLevel:'L',color:{dark:'#000',light:'#fff'}});
               }
             });
           }
         } catch(e) { console.error(e); }
       }
       refresh();
-      setInterval(refresh, 10000);
+      setInterval(refresh, 8000);
     </script>
   </body></html>`)
 })
