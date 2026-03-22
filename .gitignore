@@ -1,0 +1,8 @@
+node_modules/
+sessions/
+!sessions/.gitkeep
+.env
+.env.local
+dist/
+oracle/*.key
+oracle/*.pub
