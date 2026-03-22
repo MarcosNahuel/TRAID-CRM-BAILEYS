@@ -94,13 +94,10 @@ async function main() {
 
   await mkdir(CONFIG.SESSIONS_DIR, { recursive: true })
 
-  console.log('Iniciando sesión NACHO...')
-  await startSession('nacho', CONFIG.NACHO_PHONE, onQR)
-
   console.log('Iniciando sesión NAHUEL...')
   await startSession('nahuel', CONFIG.NAHUEL_PHONE, onQR)
 
-  console.log('Ambas sesiones iniciadas. Esperando mensajes...')
+  console.log('Sesión iniciada. Esperando mensajes...')
 }
 
 main().catch(console.error)
