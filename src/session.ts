@@ -13,6 +13,7 @@ import { CONFIG } from './config.js'
 import { extractSourceCode, extractPhoneNumber, extractContactName } from './parser.js'
 import { upsertLead, logMessage } from './api-client.js'
 import { transcribeAudio, describeImage } from './media.js'
+import { analyzeMessage, sendTelegram } from './brain.js'
 
 const logger = pino({ level: 'warn' })
 
@@ -160,5 +161,16 @@ async function handleMessage(msg: WAMessage, sessionName: string) {
     })
   } catch (err) {
     console.error(`[${sessionName}] Error logging message:`, err)
+  }
+
+  // Segundo cerebro: Gemini analiza → Telegram notifica
+  try {
+    const analysis = await analyzeMessage(pushName, phone, textContent, sessionName)
+    if (analysis) {
+      const telegramMsg = `<b>📱 ${sessionName.toUpperCase()}</b>\n<b>${pushName}</b> (${phone})\n<i>${textContent.substring(0, 100)}</i>\n\n🧠 ${analysis}`
+      await sendTelegram(telegramMsg)
+    }
+  } catch (err) {
+    console.error(`[${sessionName}] Error brain:`, err)
   }
 }
