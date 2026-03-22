@@ -3,6 +3,10 @@ import { CONFIG } from './config.js'
 
 const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_API_KEY)
 
+// Rate limiting: máximo 1 análisis cada 5 segundos para no parecer bot
+let lastAnalysis = 0
+const MIN_INTERVAL = 5000
+
 const SYSTEM_PROMPT = `Sos el "segundo cerebro" de Nahuel Albornoz, co-founder de TRAID Agency (automatización e IA para e-commerce).
 
 Tu rol: analizar mensajes de WhatsApp que llegan y dar comentarios útiles, breves y accionables.
@@ -20,6 +24,13 @@ Formato: [EMOJI] Comentario breve`
 export async function analyzeMessage(senderName: string, phone: string, content: string, sessionName: string): Promise<string | null> {
   if (!CONFIG.GEMINI_API_KEY) return null
   if (!content || content.length < 3) return null
+
+  // Rate limit
+  const now = Date.now()
+  if (now - lastAnalysis < MIN_INTERVAL) {
+    await new Promise(r => setTimeout(r, MIN_INTERVAL - (now - lastAnalysis)))
+  }
+  lastAnalysis = Date.now()
 
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })

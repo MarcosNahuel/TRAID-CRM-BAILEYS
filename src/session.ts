@@ -30,7 +30,11 @@ export async function startSession(sessionName: string, phoneNumber: string, onQ
     version,
     auth: state,
     logger,
-    browser: [`TRAID-CRM-${sessionName}`, 'Chrome', '127.0.0'],
+    browser: ['Chrome (Linux)', 'Chrome', '127.0.0'],
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
+    getMessage: async () => undefined,
   })
 
   sock.ev.on('creds.update', saveCreds)
