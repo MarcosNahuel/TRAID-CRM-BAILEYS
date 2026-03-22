@@ -18,7 +18,6 @@ export async function upsertLead(data: {
     .single()
 
   if (existing) {
-    // Actualizar nombre si cambió
     if (data.name) {
       await supabase
         .from('crm_leads')
@@ -28,7 +27,6 @@ export async function upsertLead(data: {
     return existing
   }
 
-  // Crear nuevo lead
   const { data: newLead, error } = await supabase
     .from('crm_leads')
     .insert({
@@ -53,9 +51,17 @@ export async function logMessage(data: {
   media_url?: string
   has_source_code?: boolean
 }) {
+  // Buscar lead_id por phone
+  const { data: lead } = await supabase
+    .from('crm_leads')
+    .select('id')
+    .eq('phone', data.contact_phone)
+    .single()
+
   const { error } = await supabase
     .from('crm_messages')
     .insert({
+      lead_id: lead?.id || null,
       contact_phone: data.contact_phone,
       direction: data.direction || 'inbound',
       message_type: data.message_type || 'text',
