@@ -31,7 +31,7 @@ const server = createServer((req, res) => {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>TRAID CRM — QR</title>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
       body{background:#fff;color:#222;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;padding:20px}
       h1{color:#7c3aed;font-size:1.3em}
@@ -66,11 +66,12 @@ const server = createServer((req, res) => {
                   box = document.createElement('div');
                   box.id = 'box-' + name;
                   box.className = 'qr-box';
-                  box.innerHTML = '<h2>' + name.toUpperCase() + '</h2><canvas id="cv-' + name + '"></canvas>';
+                  box.innerHTML = '<h2>' + name.toUpperCase() + '</h2><div id="qr-' + name + '"></div>';
                   container.appendChild(box);
+                } else {
+                  document.getElementById('qr-' + name).innerHTML = '';
                 }
-                const cv = document.getElementById('cv-' + name);
-                QRCode.toCanvas(cv, data[name], {width:250,margin:2,errorCorrectionLevel:'L',color:{dark:'#000',light:'#fff'}});
+                new QRCode(document.getElementById('qr-' + name), {text: data[name], width: 260, height: 260, correctLevel: QRCode.CorrectLevel.L});
               }
             });
           }
