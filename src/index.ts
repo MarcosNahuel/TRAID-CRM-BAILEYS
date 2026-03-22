@@ -87,7 +87,7 @@ server.listen(PORT, '0.0.0.0', () => {
 
 async function main() {
   console.log('TRAID CRM — WhatsApp Reader')
-  console.log(`API: ${CONFIG.API_BASE_URL}`)
+  console.log(`Supabase: ${CONFIG.SUPABASE_URL ? 'conectado' : 'no configurado'}`)
   console.log('')
 
   await mkdir(CONFIG.SESSIONS_DIR, { recursive: true })
