@@ -13,7 +13,9 @@ import { CONFIG } from './config.js'
 import { extractSourceCode, extractPhoneNumber, extractContactName } from './parser.js'
 import { upsertLead, logMessage } from './api-client.js'
 import { transcribeAudio, describeImage } from './media.js'
-import { analyzeMessage, sendTelegram } from './brain.js'
+import { analyzeMessage, extractEntities, sendTelegram } from './brain.js'
+import { embedAndStore } from './embeddings.js'
+import { persistExtractedData } from './graph-client.js'
 
 const logger = pino({ level: 'warn' })
 
@@ -31,7 +33,7 @@ export async function startSession(sessionName: string, phoneNumber: string, onQ
     auth: state,
     logger,
     browser: ['Chrome (Linux)', 'Chrome', '127.0.0'],
-    syncFullHistory: false,
+    syncFullHistory: true,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
     getMessage: async () => undefined,
@@ -61,14 +63,13 @@ export async function startSession(sessionName: string, phoneNumber: string, onQ
   })
 
   // Escuchar mensajes (SOLO LECTURA - nunca envía mensajes)
+  // Acepta 'notify' (tiempo real) y 'append' (sync histórico)
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return // solo mensajes en tiempo real
+    const isHistorySync = type === 'append'
 
     for (const msg of messages) {
-      if (msg.key.fromMe) continue // ignorar mensajes salientes
-
       try {
-        await handleMessage(msg, sessionName)
+        await handleMessage(msg, sessionName, isHistorySync)
       } catch (err) {
         console.error(`[${sessionName}] Error procesando mensaje:`, err)
       }
@@ -78,13 +79,31 @@ export async function startSession(sessionName: string, phoneNumber: string, onQ
   return sock
 }
 
-async function handleMessage(msg: WAMessage, sessionName: string) {
-  const phone = extractPhoneNumber(msg.key.remoteJid || '')
-  if (!phone || phone === 'status') return // ignorar broadcasts de estado
+async function handleMessage(msg: WAMessage, sessionName: string, isHistorySync: boolean = false) {
+  const jid = msg.key.remoteJid || ''
+  if (!jid || jid === 'status@broadcast') return // ignorar broadcasts de estado
 
-  const pushName = extractContactName(msg.pushName)
+  // Detectar si es grupo
+  const isGroup = jid.endsWith('@g.us')
+  const fromMe = !!msg.key.fromMe
+
+  // Extraer phone: en grupos, el participante; en chats, el remoteJid
+  let phone: string
+  let senderName: string
+
+  if (isGroup) {
+    // Grupos: extraer participante (quién envió) + ID del grupo
+    const participant = msg.key.participant || ''
+    phone = extractPhoneNumber(participant || jid)
+    senderName = fromMe ? 'Nahuel Albornoz' : extractContactName(msg.pushName)
+  } else {
+    phone = extractPhoneNumber(jid)
+    senderName = fromMe ? 'Nahuel Albornoz' : extractContactName(msg.pushName)
+  }
+
+  if (!phone) return
+
   const messageContent = msg.message
-
   if (!messageContent) return
 
   let textContent = ''
@@ -97,39 +116,43 @@ async function handleMessage(msg: WAMessage, sessionName: string) {
   } else if (messageContent.extendedTextMessage?.text) {
     textContent = messageContent.extendedTextMessage.text
   }
-  // Mensaje de audio
+  // En sync histórico, no descargar media (URLs expiradas)
   else if (messageContent.audioMessage) {
     messageType = 'audio'
-    try {
-      const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer
-      textContent = await transcribeAudio(buffer)
-    } catch {
-      textContent = '[Audio - no se pudo descargar]'
+    if (isHistorySync) {
+      textContent = '[Audio]'
+    } else {
+      try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer
+        textContent = await transcribeAudio(buffer)
+      } catch {
+        textContent = '[Audio - no se pudo descargar]'
+      }
     }
   }
-  // Mensaje de imagen
   else if (messageContent.imageMessage) {
     messageType = 'image'
     const caption = messageContent.imageMessage.caption || ''
-    try {
-      const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer
-      const description = await describeImage(buffer, messageContent.imageMessage.mimetype || 'image/jpeg')
-      textContent = caption ? `${caption}\n[Imagen: ${description}]` : `[Imagen: ${description}]`
-    } catch {
-      textContent = caption || '[Imagen - no se pudo procesar]'
+    if (isHistorySync) {
+      textContent = caption || '[Imagen]'
+    } else {
+      try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer
+        const description = await describeImage(buffer, messageContent.imageMessage.mimetype || 'image/jpeg')
+        textContent = caption ? `${caption}\n[Imagen: ${description}]` : `[Imagen: ${description}]`
+      } catch {
+        textContent = caption || '[Imagen - no se pudo procesar]'
+      }
     }
   }
-  // Mensaje de video
   else if (messageContent.videoMessage) {
     messageType = 'video'
     textContent = messageContent.videoMessage.caption || '[Video]'
   }
-  // Mensaje de documento
   else if (messageContent.documentMessage) {
     messageType = 'document'
     textContent = `[Documento: ${messageContent.documentMessage.fileName || 'sin nombre'}]`
   }
-  // Otros tipos - ignorar
   else {
     return
   }
@@ -137,44 +160,69 @@ async function handleMessage(msg: WAMessage, sessionName: string) {
   // Verificar código de fuente
   const sourceCode = extractSourceCode(textContent)
   const hasSourceCode = !!sourceCode
+  const direction = fromMe ? 'outbound' : 'inbound'
+  const groupTag = isGroup ? ` [GRUPO]` : ''
+  const syncTag = isHistorySync ? ` [SYNC]` : ''
 
-  console.log(`[${sessionName}] ${pushName} (${phone}): ${textContent.substring(0, 80)}${textContent.length > 80 ? '...' : ''}${sourceCode ? ` [${sourceCode}]` : ''}`)
+  console.log(`[${sessionName}]${syncTag}${groupTag} ${senderName} (${phone}): ${textContent.substring(0, 80)}${textContent.length > 80 ? '...' : ''}`)
 
-  // Upsert lead
-  try {
-    await upsertLead({
-      phone,
-      name: pushName,
-      first_message: textContent,
-      source_code: sourceCode || undefined,
-      owner: sessionName, // 'nacho' o 'nahuel'
-    })
-  } catch (err) {
-    console.error(`[${sessionName}] Error upserting lead:`, err)
+  // Upsert lead (solo para chats individuales, no grupos)
+  if (!isGroup) {
+    try {
+      await upsertLead({
+        phone,
+        name: senderName === 'Nahuel Albornoz' ? undefined : senderName,
+        first_message: textContent,
+        source_code: sourceCode || undefined,
+        owner: sessionName,
+      })
+    } catch (err) {
+      console.error(`[${sessionName}] Error upserting lead:`, err)
+    }
   }
 
-  // Log message
+  // Log message (chats + grupos)
   try {
     await logMessage({
-      contact_phone: phone,
-      direction: 'inbound',
+      contact_phone: isGroup ? jid : phone, // para grupos, guardar el JID del grupo
+      direction,
       message_type: messageType,
-      content: textContent,
+      content: isGroup ? `[${senderName}] ${textContent}` : textContent,
       media_url: mediaUrl,
       has_source_code: hasSourceCode,
     })
+
+    // Generar embedding async (fire-and-forget) — no para sync masivo
+    if (!isHistorySync) {
+      embedAndStore(phone, textContent, senderName).catch(err =>
+        console.error(`[${sessionName}] Error embedding:`, err)
+      )
+    }
   } catch (err) {
     console.error(`[${sessionName}] Error logging message:`, err)
   }
 
-  // Segundo cerebro: Gemini analiza → Telegram notifica
-  try {
-    const analysis = await analyzeMessage(pushName, phone, textContent, sessionName)
-    if (analysis) {
-      const telegramMsg = `<b>📱 ${sessionName.toUpperCase()}</b>\n<b>${pushName}</b> (${phone})\n<i>${textContent.substring(0, 100)}</i>\n\n🧠 ${analysis}`
-      await sendTelegram(telegramMsg)
+  // Segundo cerebro: solo para mensajes en tiempo real (no históricos)
+  if (!isHistorySync && !fromMe) {
+    try {
+      const analysis = await analyzeMessage(senderName, phone, textContent, sessionName)
+      if (analysis) {
+        const telegramMsg = `<b>📱 ${sessionName.toUpperCase()}</b>${groupTag}\n<b>${senderName}</b> (${phone})\n<i>${textContent.substring(0, 100)}</i>\n\n🧠 ${analysis}`
+        await sendTelegram(telegramMsg)
+      }
+    } catch (err) {
+      console.error(`[${sessionName}] Error brain:`, err)
     }
-  } catch (err) {
-    console.error(`[${sessionName}] Error brain:`, err)
+  }
+
+  // Extracción de entidades → Knowledge Graph (fire-and-forget, no para sync masivo)
+  if (!isHistorySync) {
+    extractEntities(senderName, phone, textContent)
+      .then(extraction => {
+        if (extraction) {
+          return persistExtractedData(phone, senderName, extraction)
+        }
+      })
+      .catch(err => console.error(`[${sessionName}] Error graph extraction:`, err))
   }
 }

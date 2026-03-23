@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  baileys:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: traid-baileys
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - sessions_data:/data/sessions
+    env_file:
+      - .env
+    environment:
+      - SESSIONS_DIR=/data/sessions
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: super-yo-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - HOSTNAME=0.0.0.0
+
+volumes:
+  sessions_data:

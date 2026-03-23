@@ -68,6 +68,74 @@ export async function analyzeMessage(senderName: string, phone: string, content:
   }
 }
 
+// --- Extracción de entidades para el knowledge graph ---
+
+const EXTRACTION_PROMPT = `Sos un sistema de extracción de entidades del WhatsApp de Nahuel Albornoz.
+
+CONTEXTO NAHUEL:
+- Co-founder & PM de TRAID Agency (automatización e IA para e-commerce)
+- Scopes conocidos: "traid" (trabajo TRAID), "pymeinside" (PymeInside), "dge" (DGE Mendoza), "family" (familia), "personal" (personal), "health" (salud)
+- Clientes TRAID: HUANCOM, NG Artificiales, BAZAR, TiendaLubbi, La Tinta
+- Familia: Elian (hijo)
+
+EXTRAÉ entidades y relaciones del mensaje. Respondé SOLO JSON válido, sin markdown.
+
+Schema:
+{
+  "entities": [{"name": "string", "type": "person|organization|topic|event|task|project|location|goal|decision|commitment|reminder", "scope": ["string"]}],
+  "relationships": [{"from": "string", "to": "string", "type": "string", "scope": ["string"]}],
+  "emotional_charge": "low|medium|high",
+  "detected_events": [{"title": "string", "datetime": "ISO string o null", "scope": "string"}],
+  "detected_tasks": [{"title": "string", "for_person": "string o null", "priority": "low|medium|high"}]
+}
+
+REGLAS:
+- Si no hay entidades relevantes, devolvé arrays vacíos
+- "type" de relationship: "knows", "works_at", "discussed", "mentioned", "assigned_to", "related_to", "requested", "promised"
+- Siempre incluir al sender como entidad person
+- Detectar eventos con fecha/hora (turnos, reuniones, deadlines)
+- Detectar tareas/compromisos ("te lo mando", "hacelo", "necesito que")
+- emotional_charge: "high" si hay frustración, urgencia, enojo o emoción fuerte`
+
+export interface MessageExtraction {
+  entities: Array<{ name: string; type: string; scope: string[] }>
+  relationships: Array<{ from: string; to: string; type: string; scope?: string[] }>
+  emotional_charge: 'low' | 'medium' | 'high'
+  detected_events: Array<{ title: string; datetime?: string; scope?: string }>
+  detected_tasks: Array<{ title: string; for_person?: string; priority?: string }>
+}
+
+export async function extractEntities(
+  senderName: string,
+  phone: string,
+  content: string
+): Promise<MessageExtraction | null> {
+  if (!CONFIG.GEMINI_API_KEY) return null
+  if (!content || content.length < 15) return null // necesitamos contenido sustancial
+
+  try {
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.0-flash',
+      generationConfig: { responseMimeType: 'application/json' },
+    })
+    const result = await model.generateContent({
+      contents: [{
+        role: 'user',
+        parts: [{ text: `${EXTRACTION_PROMPT}\n\nDe: ${senderName} (${phone})\nMensaje: ${content}` }]
+      }]
+    })
+
+    const text = result.response.text()?.trim()
+    if (!text) return null
+
+    const parsed = JSON.parse(text) as MessageExtraction
+    return parsed
+  } catch (err) {
+    console.error('[brain] Error extraction:', err)
+    return null
+  }
+}
+
 export async function sendTelegram(text: string): Promise<void> {
   if (!CONFIG.TELEGRAM_BOT_TOKEN || !CONFIG.TELEGRAM_CHAT_ID) return
 
