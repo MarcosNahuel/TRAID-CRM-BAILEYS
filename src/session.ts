@@ -12,7 +12,7 @@ import { join } from 'path'
 import { CONFIG } from './config.js'
 import { extractSourceCode, extractPhoneNumber, extractContactName } from './parser.js'
 import { upsertLead, logMessage } from './api-client.js'
-import { transcribeAudio, describeImage } from './media.js'
+import { transcribeAudio, describeImage, analyzeDocument } from './media.js'
 import { analyzeMessage, extractEntities, sendTelegram, bufferMessage } from './brain.js'
 import { embedAndStore } from './embeddings.js'
 import { persistExtractedData, getContactStatus } from './graph-client.js'
@@ -149,9 +149,26 @@ async function handleMessage(msg: WAMessage, sessionName: string, isHistorySync:
     messageType = 'video'
     textContent = messageContent.videoMessage.caption || '[Video]'
   }
-  else if (messageContent.documentMessage) {
+  else if (messageContent.documentMessage || messageContent.documentWithCaptionMessage) {
     messageType = 'document'
-    textContent = `[Documento: ${messageContent.documentMessage.fileName || 'sin nombre'}]`
+    const docMsg = messageContent.documentMessage || messageContent.documentWithCaptionMessage?.message?.documentMessage
+    const fileName = docMsg?.fileName || 'sin nombre'
+    const caption = (messageContent.documentWithCaptionMessage?.message?.documentMessage as any)?.caption || ''
+    const docMimeType = docMsg?.mimetype || 'application/pdf'
+
+    if (isHistorySync) {
+      textContent = caption ? `${caption}\n[Documento: ${fileName}]` : `[Documento: ${fileName}]`
+    } else {
+      try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer
+        const analysis = await analyzeDocument(buffer, docMimeType, fileName)
+        textContent = caption
+          ? `${caption}\n[Documento: ${fileName}]\n${analysis}`
+          : `[Documento: ${fileName}]\n${analysis}`
+      } catch {
+        textContent = caption ? `${caption}\n[Documento: ${fileName}]` : `[Documento: ${fileName} - no se pudo analizar]`
+      }
+    }
   }
   else {
     return
