@@ -2,6 +2,7 @@ import { startSession, OnQRCallback } from './session.js'
 import { CONFIG } from './config.js'
 import { mkdir } from 'fs/promises'
 import { createServer } from 'http'
+import { handleWebhookRequest } from './webhook-router.js'
 
 // QR store para servir via HTTP
 const qrStore: Record<string, string> = {}
@@ -14,8 +15,12 @@ const onQR: OnQRCallback = (sessionName, qrData) => {
   }
 }
 
-// Servidor HTTP para QR codes y health check
-const server = createServer((req, res) => {
+// Servidor HTTP para QR codes, health check, y webhook Meta
+const server = createServer(async (req, res) => {
+  // Webhook Meta (Super Yo via WhatsApp Cloud API)
+  const handled = await handleWebhookRequest(req, res)
+  if (handled) return
+
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ status: 'ok', sessions: Object.keys(qrStore).length === 0 ? 'connected' : 'pending' }))
@@ -30,7 +35,7 @@ const server = createServer((req, res) => {
   res.end(`<!DOCTYPE html><html><head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>TRAID CRM — QR</title>
+    <title>Super Yo — QR</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
       body{background:#fff;color:#222;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;padding:20px}
@@ -41,7 +46,7 @@ const server = createServer((req, res) => {
       canvas{border:4px solid #000;border-radius:8px}
     </style>
   </head><body>
-    <h1>TRAID CRM</h1>
+    <h1>Super Yo</h1>
     <p id="status">Cargando...</p>
     <div id="qrs"></div>
     <script>
@@ -89,7 +94,7 @@ server.listen(PORT, '0.0.0.0', () => {
 })
 
 async function main() {
-  console.log('TRAID CRM — WhatsApp Reader')
+  console.log('Super Yo — WhatsApp Reader + Agent')
   console.log(`Supabase: ${CONFIG.SUPABASE_URL ? 'conectado' : 'no configurado'}`)
   console.log('')
 

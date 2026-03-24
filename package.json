@@ -1,20 +1,25 @@
 {
-  "name": "traid-crm-baileys",
-  "version": "1.0.0",
-  "description": "WhatsApp reader for TRAID CRM Personal",
+  "name": "super-yo",
+  "version": "2.0.0",
+  "description": "Super Yo — Sistema operativo personal de Nahuel (WhatsApp reader + AI agent)",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.53",
+    "@ai-sdk/openai": "^3.0.48",
     "@google/genai": "^1.46.0",
     "@google/generative-ai": "^0.24.0",
     "@supabase/supabase-js": "^2.99.3",
     "@whiskeysockets/baileys": "^6.17.16",
+    "ai": "^6.0.137",
     "dotenv": "^17.3.1",
+    "googleapis": "^171.4.0",
     "pino": "^9.6.0",
-    "qrcode-terminal": "^0.12.0"
+    "qrcode-terminal": "^0.12.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

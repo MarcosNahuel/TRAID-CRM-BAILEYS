@@ -3,6 +3,48 @@ import { CONFIG } from './config.js'
 
 const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
 
+// --- Status de contactos (active / muted / ignored) ---
+
+export type ContactStatus = 'active' | 'muted' | 'ignored'
+
+/**
+ * Obtener status de un contacto. Default: 'muted' (solo guarda, no analiza)
+ */
+export async function getContactStatus(phone: string): Promise<ContactStatus> {
+  const entity = await findEntityByPhone(phone)
+  if (!entity) return 'muted'
+  return (entity.properties?.contact_status as ContactStatus) || 'muted'
+}
+
+/**
+ * Setear status de un contacto (active/muted/ignored)
+ */
+export async function setContactStatus(phone: string, status: ContactStatus): Promise<boolean> {
+  const entity = await findEntityByPhone(phone)
+  if (!entity) {
+    console.warn(`[graph] No se encontró entidad para phone ${phone}`)
+    return false
+  }
+
+  const mergedProps = { ...(entity.properties || {}), contact_status: status }
+
+  const { error } = await supabase
+    .from('graph_entities')
+    .update({
+      properties: mergedProps,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', entity.id)
+
+  if (error) {
+    console.error(`[graph] Error seteando status:`, error.message)
+    return false
+  }
+
+  console.log(`[graph] Status de ${entity.name} (${phone}) → ${status}`)
+  return true
+}
+
 export interface EntityInput {
   entity_type: string
   name: string

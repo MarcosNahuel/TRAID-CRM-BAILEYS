@@ -13,9 +13,9 @@ import { CONFIG } from './config.js'
 import { extractSourceCode, extractPhoneNumber, extractContactName } from './parser.js'
 import { upsertLead, logMessage } from './api-client.js'
 import { transcribeAudio, describeImage } from './media.js'
-import { analyzeMessage, extractEntities, sendTelegram } from './brain.js'
+import { analyzeMessage, extractEntities, sendTelegram, bufferMessage } from './brain.js'
 import { embedAndStore } from './embeddings.js'
-import { persistExtractedData } from './graph-client.js'
+import { persistExtractedData, getContactStatus } from './graph-client.js'
 
 const logger = pino({ level: 'warn' })
 
@@ -202,14 +202,21 @@ async function handleMessage(msg: WAMessage, sessionName: string, isHistorySync:
     console.error(`[${sessionName}] Error logging message:`, err)
   }
 
-  // Segundo cerebro: solo para mensajes en tiempo real (no históricos)
+  // Segundo cerebro: solo para contactos ACTIVE, mensajes en tiempo real
   if (!isHistorySync && !fromMe) {
     try {
-      const analysis = await analyzeMessage(senderName, phone, textContent, sessionName)
-      if (analysis) {
-        const telegramMsg = `<b>📱 ${sessionName.toUpperCase()}</b>${groupTag}\n<b>${senderName}</b> (${phone})\n<i>${textContent.substring(0, 100)}</i>\n\n🧠 ${analysis}`
-        await sendTelegram(telegramMsg)
+      const contactStatus = await getContactStatus(phone)
+
+      if (contactStatus === 'active') {
+        // Buffer de 30 seg: acumula mensajes y analiza con contexto del hilo
+        bufferMessage(senderName, phone, textContent, sessionName, isGroup, async (analysis, bufPhone, bufContent) => {
+          if (analysis) {
+            const telegramMsg = `<b>📱 ${sessionName.toUpperCase()}</b>${groupTag}\n<b>${senderName}</b> (${bufPhone})\n<i>${bufContent.substring(0, 100)}</i>\n\n🧠 ${analysis}`
+            await sendTelegram(telegramMsg)
+          }
+        })
       }
+      // muted / ignored: no análisis, solo almacenamiento (ya se guardó arriba)
     } catch (err) {
       console.error(`[${sessionName}] Error brain:`, err)
     }

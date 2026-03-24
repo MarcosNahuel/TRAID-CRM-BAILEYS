@@ -1,11 +1,129 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { createClient } from '@supabase/supabase-js'
 import { CONFIG } from './config.js'
 
 const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_API_KEY)
+const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
 
 // Rate limiting: máximo 1 análisis cada 5 segundos para no parecer bot
 let lastAnalysis = 0
 const MIN_INTERVAL = 5000
+
+// --- Conversation Buffer (30-seg debounce por contacto) ---
+
+interface BufferedMessage {
+  senderName: string
+  phone: string
+  content: string
+  sessionName: string
+  isGroup: boolean
+  timestamp: number
+}
+
+interface ConversationBuffer {
+  messages: BufferedMessage[]
+  timer: ReturnType<typeof setTimeout>
+}
+
+const conversationBuffers = new Map<string, ConversationBuffer>()
+const BUFFER_TIMEOUT = 30_000 // 30 segundos
+
+/**
+ * Agrega un mensaje al buffer del contacto.
+ * Después de 30 seg sin mensajes nuevos, dispara análisis con contexto completo del hilo.
+ */
+export function bufferMessage(
+  senderName: string,
+  phone: string,
+  content: string,
+  sessionName: string,
+  isGroup: boolean,
+  onAnalysis: (result: string | null, phone: string, bufferedContent: string) => void
+) {
+  const existing = conversationBuffers.get(phone)
+
+  if (existing) {
+    clearTimeout(existing.timer)
+    existing.messages.push({ senderName, phone, content, sessionName, isGroup, timestamp: Date.now() })
+  } else {
+    conversationBuffers.set(phone, {
+      messages: [{ senderName, phone, content, sessionName, isGroup, timestamp: Date.now() }],
+      timer: null as any,
+    })
+  }
+
+  const buffer = conversationBuffers.get(phone)!
+  buffer.timer = setTimeout(async () => {
+    const msgs = buffer.messages
+    conversationBuffers.delete(phone)
+
+    if (msgs.length === 0) return
+
+    const combinedContent = msgs.map(m => m.content).join('\n')
+    const lastMsg = msgs[msgs.length - 1]
+
+    console.log(`[brain] Buffer flush: ${msgs.length} msgs de ${lastMsg.senderName} (${phone})`)
+
+    const result = await analyzeConversation(
+      lastMsg.senderName,
+      lastMsg.phone,
+      combinedContent,
+      lastMsg.sessionName
+    )
+
+    onAnalysis(result, phone, combinedContent)
+  }, BUFFER_TIMEOUT)
+}
+
+/**
+ * Analiza un lote de mensajes con contexto completo del hilo (últimos 20 mensajes de la DB)
+ */
+export async function analyzeConversation(
+  senderName: string,
+  phone: string,
+  newContent: string,
+  sessionName: string
+): Promise<string | null> {
+  if (!CONFIG.GEMINI_API_KEY) return null
+  if (!newContent || newContent.length < 3) return null
+
+  // Rate limit
+  const now = Date.now()
+  if (now - lastAnalysis < MIN_INTERVAL) {
+    await new Promise(r => setTimeout(r, MIN_INTERVAL - (now - lastAnalysis)))
+  }
+  lastAnalysis = Date.now()
+
+  try {
+    // Cargar últimos 20 mensajes del hilo desde crm_messages
+    const { data: threadMessages } = await supabase
+      .from('crm_messages')
+      .select('content, direction, received_at')
+      .eq('contact_phone', phone)
+      .order('received_at', { ascending: false })
+      .limit(20)
+
+    const threadContext = (threadMessages || [])
+      .reverse()
+      .map(m => `[${m.direction === 'outbound' ? 'Nahuel' : senderName}]: ${m.content?.substring(0, 200)}`)
+      .join('\n')
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+    const result = await model.generateContent({
+      contents: [{
+        role: 'user',
+        parts: [{ text: `${SYSTEM_PROMPT}\n\nSesión: ${sessionName}\nDe: ${senderName} (${phone})\n\n--- HILO RECIENTE (últimos 20 mensajes) ---\n${threadContext}\n\n--- MENSAJES NUEVOS (lote acumulado) ---\n${newContent}` }]
+      }]
+    })
+
+    const text = result.response.text()?.trim()
+    if (!text || text.toLowerCase().includes('skip')) return null
+    return text
+  } catch (err) {
+    console.error('[brain] Error Gemini conversation:', err)
+    return null
+  }
+}
 
 const SYSTEM_PROMPT = `Sos el "segundo cerebro" de Nahuel Albornoz.
 
