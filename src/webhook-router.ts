@@ -39,8 +39,9 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
   }
 
   if (!signatureHeader) {
-    console.error('[webhook] No x-hub-signature-256 header')
-    return false
+    // n8n forwadea sin header de firma (ya validó él mismo)
+    console.warn('[webhook] No x-hub-signature-256 header — aceptando (proxy confiable)')
+    return true
   }
 
   const expected = createHmac('sha256', appSecret).update(rawBody).digest('hex')
