@@ -8,12 +8,12 @@ const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
 export type ContactStatus = 'active' | 'muted' | 'ignored'
 
 /**
- * Obtener status de un contacto. Default: 'muted' (solo guarda, no analiza)
+ * Obtener status de un contacto. Default: 'active' (analiza siempre salvo muted/ignored explícito)
  */
 export async function getContactStatus(phone: string): Promise<ContactStatus> {
   const entity = await findEntityByPhone(phone)
-  if (!entity) return 'muted'
-  return (entity.properties?.contact_status as ContactStatus) || 'muted'
+  if (!entity) return 'active'
+  return (entity.properties?.contact_status as ContactStatus) || 'active'
 }
 
 /**
