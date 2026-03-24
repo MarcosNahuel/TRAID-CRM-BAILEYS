@@ -700,7 +700,137 @@ export const crearBorradorEmailTool = tool({
 })
 
 /**
- * Export de todos los tools (16)
+ * 17. buscar_memoria — Buscar en agent_memory (puente bidireccional)
+ */
+export const buscarMemoriaTool = tool({
+  description:
+    'Busca en la memoria compartida entre Super Yo y Claude Code. Encuentra decisiones, action items, info de proyectos.',
+  parameters: z.object({
+    query: z.string().describe('Texto de búsqueda (busca en content y key)'),
+    project_tag: z.string().optional().describe('Filtrar por proyecto: diego-erp, alex-saas, super-yo, etc.'),
+    layer: z.number().optional().describe('Filtrar por capa: 0=estratégica, 1=proyecto'),
+    memory_type: z.string().optional().describe('Filtrar por tipo: decision, action_item, info, blocker, payment'),
+    limit: z.number().optional().default(10).describe('Cantidad de resultados'),
+  }),
+  execute: async ({ query, project_tag, layer, memory_type, limit }) => {
+    try {
+      const crm = getCrmSupabase()
+      let q = crm
+        .from('agent_memory')
+        .select('*')
+        .or(`content.ilike.%${query}%,key.ilike.%${query}%`)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+
+      if (project_tag) q = q.eq('project_tag', project_tag)
+      if (layer !== undefined) q = q.eq('layer', layer)
+      if (memory_type) q = q.eq('memory_type', memory_type)
+
+      const { data, error } = await q
+      if (error) throw new Error(error.message)
+
+      return {
+        success: true,
+        results: (data || []).map((m: any) => ({
+          id: m.id,
+          key: m.key,
+          content: m.content,
+          layer: m.layer,
+          project_tag: m.project_tag,
+          memory_type: m.memory_type,
+          source: m.source,
+          direction: m.direction,
+          created_at: m.created_at,
+        })),
+        count: (data || []).length,
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  },
+})
+
+/**
+ * 18. guardar_memoria — Escribir en agent_memory (dedup por key)
+ */
+export const guardarMemoriaTool = tool({
+  description:
+    'Guarda una observación, decisión o action item en la memoria compartida. Si ya existe la key, actualiza en vez de duplicar.',
+  parameters: z.object({
+    content: z.string().describe('Contenido de la memoria'),
+    layer: z.number().describe('Capa: 0=estratégica (negocio), 1=proyecto (técnica)'),
+    memory_type: z.enum(['decision', 'action_item', 'info', 'blocker', 'payment']).describe('Tipo de memoria'),
+    key: z.string().describe('Key human-readable, ej: nacho/pivot-partnership'),
+    project_tag: z.string().optional().describe('Tag del proyecto (null=global)'),
+    direction: z.enum(['to_agent', 'to_claude', 'both']).optional().default('both').describe('Dirección de la memoria'),
+  }),
+  execute: async ({ content, layer, memory_type, key, project_tag, direction }) => {
+    try {
+      const crm = getCrmSupabase()
+
+      // Dedup: si ya existe key, UPDATE
+      const { data: existing } = await crm
+        .from('agent_memory')
+        .select('id')
+        .eq('key', key)
+        .limit(1)
+        .single()
+
+      if (existing) {
+        const { error } = await crm
+          .from('agent_memory')
+          .update({
+            content,
+            layer,
+            memory_type,
+            project_tag: project_tag || null,
+            direction: direction || 'both',
+            synced_to_engram: false,
+            synced_at: null,
+          })
+          .eq('id', existing.id)
+
+        if (error) throw new Error(error.message)
+
+        return {
+          success: true,
+          action: 'updated',
+          message: `Memoria actualizada: "${key}"`,
+          id: existing.id,
+        }
+      }
+
+      const { data: inserted, error } = await crm
+        .from('agent_memory')
+        .insert({
+          source: 'super_yo',
+          direction: direction || 'both',
+          layer,
+          project_tag: project_tag || null,
+          memory_type,
+          key,
+          content,
+          synced_to_engram: false,
+        })
+        .select('id')
+        .single()
+
+      if (error) throw new Error(error.message)
+
+      return {
+        success: true,
+        action: 'created',
+        message: `Memoria guardada: "${key}"`,
+        id: inserted?.id,
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  },
+})
+
+/**
+ * Export de todos los tools (18)
  */
 export const superYoTools = {
   consultar_crm: consultarCrmTool,
@@ -719,4 +849,6 @@ export const superYoTools = {
   buscar_emails: buscarEmailsTool,
   leer_email: leerEmailTool,
   crear_borrador_email: crearBorradorEmailTool,
+  buscar_memoria: buscarMemoriaTool,
+  guardar_memoria: guardarMemoriaTool,
 }

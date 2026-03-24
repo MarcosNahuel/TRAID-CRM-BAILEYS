@@ -75,8 +75,78 @@ export function bufferMessage(
   }, BUFFER_TIMEOUT)
 }
 
+// --- Clasificación 3 capas + agent_memory ---
+
+interface MessageClassification {
+  layer: 0 | 1 | 2
+  project_tag: string | null
+  type: 'decision' | 'action_item' | 'info' | 'blocker' | 'payment' | 'noise'
+  summary: string
+  entities: string[]
+  urgency: 'low' | 'medium' | 'high'
+  noise_category: 'confirmation' | 'reaction' | 'filler' | 'off_topic' | null
+}
+
+const PROJECT_TAGS = [
+  { tag: 'diego-erp', keywords: ['diego', 'motos', 'repuestos', 'postventa diego'] },
+  { tag: 'alex-saas', keywords: ['alex', 'ML México', 'Chile', 'rentabilidad', 'OAuth'] },
+  { tag: 'super-yo', keywords: ['super yo', 'baileys', 'CRM', 'knowledge graph'] },
+  { tag: 'italicia', keywords: ['vittoria', 'italicia', 'italiano', 'alumnos'] },
+  { tag: 'traid-web', keywords: ['landing', 'web traid', 'página'] },
+  { tag: 'agus', keywords: ['agus', 'cost sync', 'tareas empleados'] },
+  { tag: 'miguel', keywords: ['miguel', 'postventa demo'] },
+  { tag: 'eze', keywords: ['eze', 'bot errores'] },
+  { tag: 'lubbi', keywords: ['lubbi', 'tienda lubbi', 'autopartes'] },
+  { tag: 'herman', keywords: ['herman', 'sync stock'] },
+]
+
+const STRATEGIC_KEYWORDS = [
+  'partnership', 'porcentaje', 'modelo de negocio', 'facturación',
+  'cobrar', 'pago', 'cliente nuevo', 'pivot', 'estrategia',
+  'YouTube', 'contenido', 'Shopify', 'canal de venta',
+]
+
+const CLASSIFICATION_PROMPT = `Sos el clasificador de memoria del sistema Super Yo de Nahuel Albornoz.
+
+CONTEXTO:
+- Nahuel es Co-founder & PM de TRAID Agency (automatización e IA para e-commerce)
+- Su socio es Nacho (comercial/operativo)
+- Clientes: Alex (ML México/Chile), Diego (motos), Agus (cost sync), Miguel, Eze, Lubbi, Herman, Fabio
+
+PROJECT TAGS DISPONIBLES:
+${PROJECT_TAGS.map(p => `- "${p.tag}": ${p.keywords.join(', ')}`).join('\n')}
+
+KEYWORDS ESTRATÉGICAS (siempre layer 0):
+${STRATEGIC_KEYWORDS.join(', ')}
+
+TU TAREA: Clasificar el mensaje en una de 3 capas y extraer metadata.
+
+CAPAS:
+- layer 0 (ESTRATÉGICA): Decisiones de negocio, financiero, pivotes, modelo de negocio, partnerships. Afecta a toda la empresa.
+- layer 1 (PROYECTO): Decisiones técnicas, bugs, features, estado de un cliente específico. Afecta a un proyecto.
+- layer 2 (CONVERSACIONAL): "jaja", "dale", "ok", saludos, reacciones, confirmaciones cortas. Ruido.
+
+REGLAS:
+- Si contiene keywords estratégicas → layer 0, project_tag null
+- Si menciona un cliente/proyecto específico con info sustancial → layer 1 con su project_tag
+- Si es confirmación, reacción, filler, o menos de 5 palabras → layer 2
+- type "noise" SOLO para layer 2
+- urgency "high" si hay plata pendiente, deadline, o blocker
+
+Respondé SOLO JSON válido:
+{
+  "layer": 0|1|2,
+  "project_tag": "string o null",
+  "type": "decision|action_item|info|blocker|payment|noise",
+  "summary": "resumen conciso para Claude Code",
+  "entities": ["nombres mencionados"],
+  "urgency": "low|medium|high",
+  "noise_category": "confirmation|reaction|filler|off_topic|null"
+}`
+
 /**
- * Analiza un lote de mensajes con contexto completo del hilo (últimos 20 mensajes de la DB)
+ * Analiza un lote de mensajes con clasificación 3 capas.
+ * Escribe en agent_memory (layer 0/1) y communication_metrics (siempre).
  */
 export async function analyzeConversation(
   senderName: string,
@@ -108,17 +178,121 @@ export async function analyzeConversation(
       .map(m => `[${m.direction === 'outbound' ? 'Nahuel' : senderName}]: ${m.content?.substring(0, 200)}`)
       .join('\n')
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-    const result = await model.generateContent({
-      contents: [{
-        role: 'user',
-        parts: [{ text: `${SYSTEM_PROMPT}\n\nSesión: ${sessionName}\nDe: ${senderName} (${phone})\n\n--- HILO RECIENTE (últimos 20 mensajes) ---\n${threadContext}\n\n--- MENSAJES NUEVOS (lote acumulado) ---\n${newContent}` }]
-      }]
+    // Paso 1: Clasificar con structured output
+    const classifierModel = genAI.getGenerativeModel({
+      model: 'gemini-2.0-flash',
+      generationConfig: { responseMimeType: 'application/json' },
     })
 
-    const text = result.response.text()?.trim()
-    if (!text || text.toLowerCase().includes('skip')) return null
-    return text
+    const classResult = await classifierModel.generateContent({
+      contents: [{
+        role: 'user',
+        parts: [{ text: `${CLASSIFICATION_PROMPT}\n\nDe: ${senderName} (${phone})\nSesión: ${sessionName}\n\n--- HILO RECIENTE ---\n${threadContext}\n\n--- MENSAJES NUEVOS ---\n${newContent}` }],
+      }],
+    })
+
+    const classText = classResult.response.text()?.trim()
+    if (!classText) return null
+
+    const classification: MessageClassification = JSON.parse(classText)
+    console.log(`[brain] Clasificación: layer=${classification.layer} type=${classification.type} project=${classification.project_tag} urgency=${classification.urgency}`)
+
+    // Paso 2: Escribir en agent_memory si es señal (layer 0 o 1)
+    if (classification.layer <= 1 && classification.type !== 'noise') {
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+      const key = `${senderName.toLowerCase().replace(/\s+/g, '-')}/${classification.type}-${timestamp}`
+
+      const { error: memError } = await supabase
+        .from('agent_memory')
+        .insert({
+          source: 'super_yo',
+          direction: 'to_claude',
+          layer: classification.layer,
+          project_tag: classification.project_tag,
+          memory_type: classification.type,
+          scope: classification.project_tag ? [classification.project_tag] : ['traid'],
+          key,
+          content: classification.summary,
+          synced_to_engram: false,
+        })
+
+      if (memError) {
+        console.error('[brain] Error writing agent_memory:', memError.message)
+      } else {
+        console.log(`[brain] Memoria guardada: ${key} (layer ${classification.layer})`)
+      }
+    }
+
+    // Paso 3: Upsert communication_metrics
+    try {
+      const today = new Date().toISOString().split('T')[0]
+      const isSignal = classification.layer <= 1
+      const noiseCategory = classification.noise_category || 'other'
+
+      // Intentar update primero (más común)
+      const { data: existing } = await supabase
+        .from('communication_metrics')
+        .select('id, total_messages, signal_count, noise_count, noise_categories, top_topics')
+        .eq('contact_phone', phone)
+        .eq('date', today)
+        .eq('direction', 'received')
+        .single()
+
+      if (existing) {
+        const noiseCats = (existing.noise_categories as Record<string, number>) || {}
+        if (!isSignal) {
+          noiseCats[noiseCategory] = (noiseCats[noiseCategory] || 0) + 1
+        }
+
+        const topics = (existing.top_topics as string[]) || []
+        if (isSignal && classification.summary) {
+          const shortTopic = classification.summary.slice(0, 50)
+          if (!topics.includes(shortTopic)) topics.push(shortTopic)
+          if (topics.length > 5) topics.shift()
+        }
+
+        await supabase
+          .from('communication_metrics')
+          .update({
+            total_messages: (existing.total_messages || 0) + 1,
+            signal_count: (existing.signal_count || 0) + (isSignal ? 1 : 0),
+            noise_count: (existing.noise_count || 0) + (isSignal ? 0 : 1),
+            noise_categories: noiseCats,
+            top_topics: topics,
+          })
+          .eq('id', existing.id)
+      } else {
+        await supabase
+          .from('communication_metrics')
+          .insert({
+            contact_phone: phone,
+            contact_name: senderName,
+            date: today,
+            direction: 'received',
+            total_messages: 1,
+            signal_count: isSignal ? 1 : 0,
+            noise_count: isSignal ? 0 : 1,
+            noise_categories: isSignal ? {} : { [noiseCategory]: 1 },
+            top_topics: isSignal && classification.summary ? [classification.summary.slice(0, 50)] : [],
+          })
+      }
+    } catch (metricsErr) {
+      console.error('[brain] Error communication_metrics:', metricsErr)
+    }
+
+    // Paso 4: Retornar para Telegram solo si es señal relevante
+    if (classification.layer === 2) return null
+
+    // Telegram solo para urgencia alta o blocker/payment
+    const emoji = classification.urgency === 'high' ? '🚨'
+      : classification.type === 'payment' ? '💰'
+      : classification.type === 'blocker' ? '🔴'
+      : classification.type === 'decision' ? '📋'
+      : classification.type === 'action_item' ? '📌'
+      : 'ℹ️'
+
+    const layerLabel = classification.layer === 0 ? '[ESTRATÉGICA]' : `[${classification.project_tag || 'PROYECTO'}]`
+    return `${emoji} ${layerLabel} ${classification.summary}`
   } catch (err) {
     console.error('[brain] Error Gemini conversation:', err)
     return null
