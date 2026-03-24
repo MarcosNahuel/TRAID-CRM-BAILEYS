@@ -76,6 +76,19 @@ export async function startSession(sessionName: string, phoneNumber: string, onQ
     }
   })
 
+  // Historial masivo al conectar (hasta 90 días según WhatsApp)
+  sock.ev.on('messaging-history.set', async ({ messages: histMessages, chats, isLatest }) => {
+    console.log(`[${sessionName}] Historial masivo: ${histMessages.length} msgs, ${chats.length} chats, isLatest=${isLatest}`)
+
+    for (const msg of histMessages) {
+      try {
+        await handleMessage(msg, sessionName, true)
+      } catch (err) {
+        console.error(`[${sessionName}] Error procesando historial:`, err)
+      }
+    }
+  })
+
   return sock
 }
 

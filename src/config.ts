@@ -9,5 +9,5 @@ export const CONFIG = {
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || '',
   NACHO_PHONE: process.env.NACHO_PHONE || '',
   NAHUEL_PHONE: process.env.NAHUEL_PHONE || '',
-  SESSIONS_DIR: './sessions',
+  SESSIONS_DIR: process.env.SESSIONS_DIR || './sessions',
 }
