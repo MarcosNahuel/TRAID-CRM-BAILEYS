@@ -16,13 +16,10 @@ import {
   updateEntityProperties,
 } from './crm-client.js'
 
-// Embedding helper (usa Gemini)
+// Embedding helper — reutiliza embedText() que usa @google/genai (v1, no v1beta)
 async function embedQuery(text: string): Promise<number[]> {
-  const { GoogleGenerativeAI } = await import('@google/generative-ai')
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '')
-  const model = genAI.getGenerativeModel({ model: 'text-embedding-004' })
-  const result = await model.embedContent(text)
-  return result.embedding.values
+  const { embedText } = await import('../embeddings.js')
+  return embedText(text, 'RETRIEVAL_QUERY')
 }
 
 /**
