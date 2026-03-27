@@ -280,16 +280,25 @@ export async function analyzeConversation(
       console.error('[brain] Error communication_metrics:', metricsErr)
     }
 
-    // Paso 4: Retornar para Telegram solo si es señal relevante
+    // Paso 4: Telegram SOLO para señales realmente importantes
+    // Filtro estricto: solo urgencia alta, blockers, pagos o decisiones estratégicas
     if (classification.layer === 2) return null
+    if (classification.type === 'info' && classification.urgency !== 'high') return null
+    if (classification.type === 'action_item' && classification.urgency === 'low') return null
 
-    // Telegram solo para urgencia alta o blocker/payment
+    // Solo notificar de Nacho o grupos dev, no de cualquier contacto
+    const isNacho = phone === CONFIG.NACHO_PHONE
+    const isDevGroup = sessionName.toLowerCase().includes('dev') || sessionName.toLowerCase().includes('traid')
+    const isStrategic = classification.layer === 0
+    const isCritical = classification.urgency === 'high' || classification.type === 'blocker' || classification.type === 'payment'
+
+    if (!isNacho && !isDevGroup && !isStrategic && !isCritical) return null
+
     const emoji = classification.urgency === 'high' ? '🚨'
       : classification.type === 'payment' ? '💰'
       : classification.type === 'blocker' ? '🔴'
       : classification.type === 'decision' ? '📋'
-      : classification.type === 'action_item' ? '📌'
-      : 'ℹ️'
+      : '📌'
 
     const layerLabel = classification.layer === 0 ? '[ESTRATÉGICA]' : `[${classification.project_tag || 'PROYECTO'}]`
     return `${emoji} ${layerLabel} ${classification.summary}`
