@@ -5,7 +5,7 @@ import { CONFIG } from './config.js'
 const ai = new GoogleGenAI({ apiKey: CONFIG.GEMINI_API_KEY })
 const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
 
-const EMBEDDING_MODEL = 'text-embedding-004'
+const EMBEDDING_MODEL = 'gemini-embedding-2-preview'
 const DIMENSIONS = 768
 
 /**
