@@ -28,9 +28,56 @@ interface ConversationBuffer {
 const conversationBuffers = new Map<string, ConversationBuffer>()
 const BUFFER_TIMEOUT = 30_000 // 30 segundos
 
+// --- Whitelist: solo analizar contactos/grupos importantes ---
+// Teléfonos individuales que importan
+const IMPORTANT_PHONES = new Set([
+  CONFIG.NACHO_PHONE,        // Nacho (socio)
+  CONFIG.NAHUEL_PHONE,       // Nahuel mismo
+  '5492615181225',           // Nahuel wa_id
+])
+
+// Patrones de nombre de grupo que importan (case insensitive)
+const IMPORTANT_GROUP_PATTERNS = [
+  'traid', 'dev', 'desarrollo', 'proyecto',
+  'diego', 'alex', 'lubbi', 'herman', 'italicia',
+]
+
+// Contactos del graph que son clientes/socios (se carga 1 vez)
+let importantPhonesLoaded = false
+async function loadImportantPhones() {
+  if (importantPhonesLoaded) return
+  try {
+    const { data } = await supabase
+      .from('graph_entities')
+      .select('properties')
+      .eq('entity_type', 'person')
+      .in('business_relevance', ['high', 'critical'])
+      .not('properties->phone', 'is', null)
+    for (const e of data || []) {
+      if (e.properties?.phone) IMPORTANT_PHONES.add(e.properties.phone)
+    }
+    importantPhonesLoaded = true
+    console.log(`[brain] Whitelist cargada: ${IMPORTANT_PHONES.size} contactos importantes`)
+  } catch {}
+}
+
+function isImportantContact(phone: string, sessionName: string, isGroup: boolean): boolean {
+  // Contactos individuales en whitelist
+  if (IMPORTANT_PHONES.has(phone)) return true
+
+  // Grupos con nombre relevante
+  if (isGroup) {
+    const lower = sessionName.toLowerCase()
+    return IMPORTANT_GROUP_PATTERNS.some(p => lower.includes(p))
+  }
+
+  return false
+}
+
 /**
  * Agrega un mensaje al buffer del contacto.
  * Después de 30 seg sin mensajes nuevos, dispara análisis con contexto completo del hilo.
+ * SOLO analiza contactos/grupos en la whitelist — el resto se ignora.
  */
 export function bufferMessage(
   senderName: string,
@@ -40,6 +87,12 @@ export function bufferMessage(
   isGroup: boolean,
   onAnalysis: (result: string | null, phone: string, bufferedContent: string) => void
 ) {
+  // Cargar whitelist la primera vez
+  loadImportantPhones()
+
+  // Skip si no es contacto/grupo importante
+  if (!isImportantContact(phone, sessionName, isGroup)) return
+
   const existing = conversationBuffers.get(phone)
 
   if (existing) {
