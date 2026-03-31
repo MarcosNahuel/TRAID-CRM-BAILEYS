@@ -12,18 +12,23 @@
 import { tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod/v4'
 
-const SUPABASE_URL = process.env.SUPABASE_URL || ''
-const SUPABASE_KEY = process.env.SUPABASE_KEY || ''
+function getSupabaseConfig() {
+  return {
+    url: process.env.SUPABASE_URL || '',
+    key: process.env.SUPABASE_KEY || '',
+  }
+}
 
 /**
  * Helper: query Supabase REST API
  */
-async function supabaseQuery(
+export async function supabaseQuery(
   table: string,
   params: Record<string, string> = {},
   options?: { method?: string; body?: unknown }
 ): Promise<{ data: any; error: string | null }> {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`)
+  const { url: baseUrl, key } = getSupabaseConfig()
+  const url = new URL(`${baseUrl}/rest/v1/${table}`)
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v)
   }
@@ -32,8 +37,8 @@ async function supabaseQuery(
     const res = await fetch(url.toString(), {
       method: options?.method || 'GET',
       headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
+        apikey: key,
+        Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
         Prefer: 'return=representation',
       },
@@ -55,16 +60,17 @@ async function supabaseQuery(
 /**
  * Helper: query Supabase RPC function
  */
-async function supabaseRpc(
+export async function supabaseRpc(
   fn: string,
   params: Record<string, unknown>
 ): Promise<{ data: any; error: string | null }> {
+  const { url: baseUrl, key } = getSupabaseConfig()
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    const res = await fetch(`${baseUrl}/rest/v1/rpc/${fn}`, {
       method: 'POST',
       headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
+        apikey: key,
+        Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(params),
