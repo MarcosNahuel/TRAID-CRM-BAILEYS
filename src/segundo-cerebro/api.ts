@@ -8,7 +8,9 @@
 import { IncomingMessage, ServerResponse } from 'http'
 import { processQuery, dailyBrief } from './brain.js'
 
-const BACKEND_SECRET = process.env.BACKEND_SECRET || ''
+function getBackendSecret(): string {
+  return process.env.BACKEND_SECRET || ''
+}
 
 function parseBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -43,9 +45,10 @@ export async function handleCerebroRequest(
   }
 
   // Auth check
-  if (BACKEND_SECRET) {
+  const secret = getBackendSecret()
+  if (secret) {
     const auth = req.headers.authorization
-    if (!auth || auth !== `Bearer ${BACKEND_SECRET}`) {
+    if (!auth || auth !== `Bearer ${secret}`) {
       sendJson(res, 401, { error: 'Unauthorized' })
       return true
     }

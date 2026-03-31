@@ -24,7 +24,7 @@ export const NAHUEL_WA_ID = process.env.NAHUEL_WA_ID || '5492615181225'
  * Detecta si el mensaje es para el segundo cerebro
  * Retorna el prompt extraído o null si no aplica
  */
-function detectCerebroCommand(text: string): { type: 'cerebro'; prompt: string } | { type: 'brief' } | null {
+export function detectCerebroCommand(text: string): { type: 'cerebro'; prompt: string } | { type: 'brief' } | null {
   const trimmed = text.trim().toLowerCase()
 
   // Detectar "brief" o "/brief"
