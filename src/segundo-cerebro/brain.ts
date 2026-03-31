@@ -43,6 +43,7 @@ export async function processQuery(prompt: string): Promise<string> {
         mcpServers: {
           'superyo-data': superyoDataServer,
         },
+        executable: 'node',
         cwd: process.cwd(),
       },
     })
@@ -50,6 +51,7 @@ export async function processQuery(prompt: string): Promise<string> {
     let resultText = ''
 
     for await (const message of conversation) {
+      // Log todos los mensajes para debug
       if (message.type === 'result') {
         const result = message as Extract<SDKMessage, { type: 'result' }>
         resultText = (result as any).result || ''
@@ -57,9 +59,15 @@ export async function processQuery(prompt: string): Promise<string> {
         const duration = Date.now() - startTime
         const cost = (result as any).total_cost_usd || 0
         const turns = (result as any).num_turns || 0
+        const subtype = (result as any).subtype || 'unknown'
         console.log(
-          `[segundo-cerebro] Completado en ${duration}ms | ${turns} turns | $${cost.toFixed(4)}`
+          `[segundo-cerebro] ${subtype} en ${duration}ms | ${turns} turns | $${cost.toFixed(4)}`
         )
+        if (subtype !== 'success') {
+          console.error(`[segundo-cerebro] Result error:`, JSON.stringify(result).substring(0, 500))
+        }
+      } else {
+        console.log(`[segundo-cerebro] Message type: ${message.type}`)
       }
     }
 
