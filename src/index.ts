@@ -1,8 +1,9 @@
 import { startSession, OnQRCallback } from './session.js'
 import { CONFIG } from './config.js'
 import { mkdir } from 'fs/promises'
-import { createServer } from 'http'
+import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { handleWebhookRequest } from './webhook-router.js'
+import { handleCerebroRequest } from './segundo-cerebro/api.js'
 
 // QR store para servir via HTTP
 const qrStore: Record<string, string> = {}
@@ -17,6 +18,10 @@ const onQR: OnQRCallback = (sessionName, qrData) => {
 
 // Servidor HTTP para QR codes, health check, y webhook Meta
 const server = createServer(async (req, res) => {
+  // API Segundo Cerebro
+  const cerebroHandled = await handleCerebroRequest(req, res)
+  if (cerebroHandled) return
+
   // Webhook Meta (Super Yo via WhatsApp Cloud API)
   const handled = await handleWebhookRequest(req, res)
   if (handled) return

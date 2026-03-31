@@ -11,6 +11,7 @@ services:
       - "3001:3001"
     volumes:
       - sessions_data:/data/sessions
+      - claude_auth:/root/.claude
     env_file:
       - .env
     environment:
@@ -32,3 +33,4 @@ services:
 
 volumes:
   sessions_data:
+  claude_auth:
