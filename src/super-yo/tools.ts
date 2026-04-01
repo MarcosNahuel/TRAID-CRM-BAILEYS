@@ -44,33 +44,14 @@ export const consultarCrmTool = tool({
         return { success: true, results: messages, count: messages.length }
       }
 
-      // Intentar búsqueda híbrida (embedding + texto)
-      try {
-        const embedding = await embedQuery(query)
-        const results = await hybridSearchMessages(embedding, query, limit)
-        return { success: true, results, count: results.length }
-      } catch {
-        // Fallback: búsqueda por texto directo en Supabase
-        console.log('[consultar_crm] Embedding falló, usando búsqueda por texto')
-        const { data, error } = await getCrmSupabase()
-          .from('crm_messages')
-          .select('id, content, contact_phone, received_at')
-          .textSearch('search_vector', query.split(' ').join(' & '), { type: 'plain' })
-          .order('received_at', { ascending: false })
-          .limit(limit || 10)
-
-        if (error) {
-          // Último fallback: ILIKE simple
-          const { data: ilike } = await getCrmSupabase()
-            .from('crm_messages')
-            .select('id, content, contact_phone, received_at')
-            .ilike('content', `%${query}%`)
-            .order('received_at', { ascending: false })
-            .limit(limit || 10)
-          return { success: true, results: ilike || [], count: ilike?.length || 0, method: 'ilike_fallback' }
-        }
-        return { success: true, results: data || [], count: data?.length || 0, method: 'text_search' }
-      }
+      // Búsqueda directa por ILIKE — siempre funciona, no depende de embeddings/Gemini
+      const { data } = await getCrmSupabase()
+        .from('crm_messages')
+        .select('id, content, contact_phone, received_at')
+        .ilike('content', `%${query}%`)
+        .order('received_at', { ascending: false })
+        .limit(limit || 10)
+      return { success: true, results: data || [], count: data?.length || 0 }
     } catch (err: any) {
       return { success: false, error: err.message }
     }
