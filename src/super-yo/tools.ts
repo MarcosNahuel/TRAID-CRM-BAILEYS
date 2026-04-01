@@ -50,11 +50,28 @@ export const consultarCrmTool = tool({
       const searchTerm = keywords.length > 0 ? keywords[0] : query
 
       // Paso 1: intentar resolver keyword como nombre de contacto → teléfono
-      const { data: leads } = await getCrmSupabase()
-        .from('crm_leads')
-        .select('name, phone')
-        .ilike('name', `%${searchTerm}%`)
-        .limit(3)
+      // Apodos comunes argentinos
+      const nicknames: Record<string, string[]> = {
+        'nacho': ['nacho', 'ignacio'],
+        'seba': ['seba', 'sebastian', 'sebastián'],
+        'fede': ['fede', 'federico'],
+        'gabi': ['gabi', 'gabriel'],
+        'ale': ['ale', 'alejandro', 'alejandra'],
+        'mati': ['mati', 'matias', 'matías'],
+        'nico': ['nico', 'nicolas', 'nicolás'],
+        'pato': ['pato', 'patricio', 'patricia'],
+        'agus': ['agus', 'agustin', 'agustín', 'agustina'],
+      }
+      const searchNames = nicknames[searchTerm] || [searchTerm]
+      let leads: any[] = []
+      for (const sn of searchNames) {
+        const { data } = await getCrmSupabase()
+          .from('crm_leads')
+          .select('name, phone')
+          .ilike('name', `%${sn}%`)
+          .limit(3)
+        if (data?.length) { leads = data; break }
+      }
 
       if (leads && leads.length > 0) {
         // Encontró contacto(s) — buscar mensajes por teléfono(s)
