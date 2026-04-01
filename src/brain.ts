@@ -231,20 +231,36 @@ export async function analyzeConversation(
       .map(m => `[${m.direction === 'outbound' ? 'Nahuel' : senderName}]: ${m.content?.substring(0, 200)}`)
       .join('\n')
 
-    // Paso 1: Clasificar con structured output
-    const classifierModel = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
-      generationConfig: { responseMimeType: 'application/json' },
-    })
+    // Paso 1: Clasificar con structured output (Gemini → OpenAI fallback)
+    const classPrompt = `${CLASSIFICATION_PROMPT}\n\nDe: ${senderName} (${phone})\nSesión: ${sessionName}\n\n--- HILO RECIENTE ---\n${threadContext}\n\n--- MENSAJES NUEVOS ---\n${newContent}`
+    let classText: string | null = null
 
-    const classResult = await classifierModel.generateContent({
-      contents: [{
-        role: 'user',
-        parts: [{ text: `${CLASSIFICATION_PROMPT}\n\nDe: ${senderName} (${phone})\nSesión: ${sessionName}\n\n--- HILO RECIENTE ---\n${threadContext}\n\n--- MENSAJES NUEVOS ---\n${newContent}` }],
-      }],
-    })
-
-    const classText = classResult.response.text()?.trim()
+    try {
+      const classifierModel = genAI.getGenerativeModel({
+        model: 'gemini-2.0-flash',
+        generationConfig: { responseMimeType: 'application/json' },
+      })
+      const classResult = await classifierModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text: classPrompt }] }],
+      })
+      classText = classResult.response.text()?.trim() || null
+    } catch (geminiErr: any) {
+      // Fallback a OpenAI si Gemini falla (429, etc.)
+      if (process.env.OPENAI_API_KEY) {
+        console.log(`[brain] Gemini falló (${geminiErr.message?.substring(0, 50)}), usando OpenAI fallback`)
+        const { generateText } = await import('ai')
+        const { createOpenAI } = await import('@ai-sdk/openai')
+        const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY })
+        const fallback = await generateText({
+          model: openai('gpt-4o-mini'),
+          system: 'Respondé SOLO JSON válido, sin markdown ni backticks.',
+          prompt: classPrompt,
+        })
+        classText = fallback.text?.trim() || null
+      } else {
+        throw geminiErr
+      }
+    }
     if (!classText) return null
 
     const classification: MessageClassification = JSON.parse(classText)

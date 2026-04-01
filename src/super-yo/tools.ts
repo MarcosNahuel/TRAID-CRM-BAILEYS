@@ -41,21 +41,48 @@ export const consultarCrmTool = tool({
     try {
       if (phone) {
         const messages = await getMessagesByPhone(phone, limit)
-        return { success: true, results: messages, count: messages.length }
+        return { success: true, results: messages, count: messages.length, method: 'by_phone' }
       }
 
-      // Búsqueda directa por ILIKE — cada palabra significativa por separado
-      const stopWords = new Set(['busca', 'buscar', 'mensajes', 'conversaciones', 'con', 'de', 'del', 'la', 'el', 'los', 'las', 'que', 'en', 'por', 'para', 'un', 'una', 'es', 'y', 'o', 'a', 'mi', 'mis', 'me', 'se', 'le', 'lo', 'su', 'sus', 'como', 'qué', 'cual', 'sobre', 'entre', 'tiene', 'tiene', 'hay', 'fue', 'son', 'era', 'ser', 'al', 'más', 'últimas', 'últimos', 'dame', 'dime', 'muestra', 'ver'])
+      // Extraer keywords significativas
+      const stopWords = new Set(['busca', 'buscar', 'mensajes', 'conversaciones', 'con', 'de', 'del', 'la', 'el', 'los', 'las', 'que', 'en', 'por', 'para', 'un', 'una', 'es', 'y', 'o', 'a', 'mi', 'mis', 'me', 'se', 'le', 'lo', 'su', 'sus', 'como', 'qué', 'cual', 'sobre', 'entre', 'tiene', 'hay', 'fue', 'son', 'era', 'ser', 'al', 'más', 'últimas', 'últimos', 'dame', 'dime', 'muestra', 'ver', 'dice', 'dijo', 'habla', 'hablo', 'último', 'última'])
       const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w))
       const searchTerm = keywords.length > 0 ? keywords[0] : query
 
+      // Paso 1: intentar resolver keyword como nombre de contacto → teléfono
+      const { data: leads } = await getCrmSupabase()
+        .from('crm_leads')
+        .select('name, phone')
+        .ilike('name', `%${searchTerm}%`)
+        .limit(3)
+
+      if (leads && leads.length > 0) {
+        // Encontró contacto(s) — buscar mensajes por teléfono(s)
+        const phones = leads.map(l => l.phone)
+        const { data: msgs } = await getCrmSupabase()
+          .from('crm_messages')
+          .select('id, content, contact_phone, direction, received_at')
+          .in('contact_phone', phones)
+          .order('received_at', { ascending: false })
+          .limit(limit || 10)
+        return {
+          success: true,
+          contact: leads[0].name,
+          phones,
+          results: msgs || [],
+          count: msgs?.length || 0,
+          method: 'by_contact_name',
+        }
+      }
+
+      // Paso 2: fallback a ILIKE por contenido
       const { data } = await getCrmSupabase()
         .from('crm_messages')
         .select('id, content, contact_phone, received_at')
         .ilike('content', `%${searchTerm}%`)
         .order('received_at', { ascending: false })
         .limit(limit || 10)
-      return { success: true, results: data || [], count: data?.length || 0, keyword: searchTerm }
+      return { success: true, results: data || [], count: data?.length || 0, keyword: searchTerm, method: 'by_content' }
     } catch (err: any) {
       return { success: false, error: err.message }
     }
