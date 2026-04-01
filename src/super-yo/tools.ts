@@ -44,14 +44,18 @@ export const consultarCrmTool = tool({
         return { success: true, results: messages, count: messages.length }
       }
 
-      // Búsqueda directa por ILIKE — siempre funciona, no depende de embeddings/Gemini
+      // Búsqueda directa por ILIKE — cada palabra significativa por separado
+      const stopWords = new Set(['busca', 'buscar', 'mensajes', 'conversaciones', 'con', 'de', 'del', 'la', 'el', 'los', 'las', 'que', 'en', 'por', 'para', 'un', 'una', 'es', 'y', 'o', 'a', 'mi', 'mis', 'me', 'se', 'le', 'lo', 'su', 'sus', 'como', 'qué', 'cual', 'sobre', 'entre', 'tiene', 'tiene', 'hay', 'fue', 'son', 'era', 'ser', 'al', 'más', 'últimas', 'últimos', 'dame', 'dime', 'muestra', 'ver'])
+      const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w))
+      const searchTerm = keywords.length > 0 ? keywords[0] : query
+
       const { data } = await getCrmSupabase()
         .from('crm_messages')
         .select('id, content, contact_phone, received_at')
-        .ilike('content', `%${query}%`)
+        .ilike('content', `%${searchTerm}%`)
         .order('received_at', { ascending: false })
         .limit(limit || 10)
-      return { success: true, results: data || [], count: data?.length || 0 }
+      return { success: true, results: data || [], count: data?.length || 0, keyword: searchTerm }
     } catch (err: any) {
       return { success: false, error: err.message }
     }
