@@ -76,12 +76,15 @@ export const consultarCrmTool = tool({
       }
 
       // Paso 2: fallback a ILIKE por contenido
-      const { data } = await getCrmSupabase()
+      console.log(`[consultar_crm] Buscando ILIKE '%${searchTerm}%' en crm_messages`)
+      const { data, error: dbErr } = await getCrmSupabase()
         .from('crm_messages')
         .select('id, content, contact_phone, received_at')
         .ilike('content', `%${searchTerm}%`)
         .order('received_at', { ascending: false })
         .limit(limit || 10)
+      if (dbErr) console.error('[consultar_crm] DB error:', dbErr.message)
+      console.log(`[consultar_crm] Resultados: ${data?.length || 0}`)
       return { success: true, results: data || [], count: data?.length || 0, keyword: searchTerm, method: 'by_content' }
     } catch (err: any) {
       return { success: false, error: err.message }
