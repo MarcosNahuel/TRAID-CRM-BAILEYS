@@ -10,7 +10,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { generateText, stepCountIs } from 'ai'
 import { checkGuardrails } from './middleware.js'
 import { superYoTools } from './tools.js'
-import { getSuperYoChatHistory, saveSuperYoMessage } from './crm-client.js'
+import { getSuperYoChatHistory, saveSuperYoMessage, loadAgentContext } from './crm-client.js'
 
 const google = process.env.GEMINI_API_KEY
   ? createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY })
@@ -114,6 +114,19 @@ TENÉS herramientas para consultar datos reales. NUNCA respondas "no puedo acced
 
 REGLA CRÍTICA: Si el usuario pregunta por información, datos, mensajes o contactos — PRIMERO llamá a la herramienta, DESPUÉS respondé con los datos. Nunca digas que no podés sin intentar.
 
+## MEMORIA Y APRENDIZAJE
+
+Tenés acceso a memorias persistentes que se cargan automáticamente al inicio de cada conversación. Usalas para dar respuestas con contexto.
+
+CUÁNDO GUARDAR MEMORIA (usar **guardar_memoria**):
+- Nahuel te dice algo nuevo sobre un contacto → guardar como "info"
+- Se toma una decisión de negocio → guardar como "decision"
+- Hay un pendiente → guardar como "action_item"
+- Algo bloquea un proyecto → guardar como "blocker"
+- Se registra un pago → guardar como "payment"
+
+REGLA: Si Nahuel te dice información que sería útil recordar en el futuro, guardala sin que te lo pida. Ejemplos: "nacho es mi socio", "diego paga 500 USD", "el proyecto de alex está pausado".
+
 ## FORMATO
 - Respuestas cortas y directas para WhatsApp
 - NO digas "Voy a usar la herramienta X..." — simplemente usala y respondé
@@ -152,7 +165,8 @@ export async function generateSuperYoResponse({
   }
 
   const dynamicContext = `\nFecha actual: ${new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`
-  const systemPrompt = SUPER_YO_SYSTEM_PROMPT + dynamicContext
+  const memoryContext = await loadAgentContext(mensaje)
+  const systemPrompt = SUPER_YO_SYSTEM_PROMPT + dynamicContext + memoryContext
 
   type ModelEntry = { id: string; provider: string; model: any }
   const modelCascade: ModelEntry[] = [

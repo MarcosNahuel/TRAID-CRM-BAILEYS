@@ -20,6 +20,80 @@ export function getCrmSupabase(): SupabaseClient {
   return crmClient
 }
 
+/**
+ * Cargar contexto relevante para el agente basado en el mensaje del usuario.
+ * Busca en agent_memory y graph_entities para dar contexto al LLM.
+ */
+export async function loadAgentContext(userMessage: string): Promise<string> {
+  const crm = getCrmSupabase()
+  const parts: string[] = []
+
+  try {
+    // 1. Últimas memorias relevantes (decisiones, blockers, action items)
+    const { data: memories } = await crm
+      .from('agent_memory')
+      .select('memory_type, key, content, project_tag, created_at')
+      .in('memory_type', ['decision', 'action_item', 'blocker', 'payment'])
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+    if (memories?.length) {
+      parts.push('## MEMORIAS RECIENTES')
+      for (const m of memories) {
+        const tag = m.project_tag ? `[${m.project_tag}]` : ''
+        parts.push(`- [${m.memory_type}] ${tag} ${m.content}`)
+      }
+    }
+
+    // 2. Extraer nombres mencionados y buscar en graph
+    const words = userMessage.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+    for (const word of words.slice(0, 3)) {
+      const { data: entity } = await crm
+        .from('graph_entities')
+        .select('name, entity_type, summary, scope, properties')
+        .ilike('name', `%${word}%`)
+        .eq('entity_type', 'person')
+        .limit(1)
+        .single()
+
+      if (entity) {
+        parts.push(`## CONTEXTO: ${entity.name}`)
+        if (entity.summary) parts.push(`Resumen: ${entity.summary}`)
+        if (entity.scope?.length) parts.push(`Scopes: ${entity.scope.join(', ')}`)
+        const props = entity.properties || {}
+        if (props.phone) parts.push(`Tel: ${props.phone}`)
+        if (props.role) parts.push(`Rol: ${props.role}`)
+        break // Solo el primer match
+      }
+    }
+
+    // 3. Proyectos activos (últimas memorias por proyecto)
+    const { data: projects } = await crm
+      .from('agent_memory')
+      .select('project_tag, content, memory_type')
+      .not('project_tag', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    if (projects?.length) {
+      const byProject = new Map<string, string[]>()
+      for (const p of projects) {
+        if (!byProject.has(p.project_tag)) byProject.set(p.project_tag, [])
+        byProject.get(p.project_tag)!.push(`${p.memory_type}: ${p.content}`)
+      }
+      parts.push('## PROYECTOS ACTIVOS')
+      for (const [tag, items] of byProject) {
+        parts.push(`### ${tag}`)
+        items.forEach(i => parts.push(`- ${i}`))
+      }
+    }
+  } catch (err) {
+    console.error('[agent-context] Error cargando contexto:', err)
+  }
+
+  return parts.length > 0 ? '\n\n--- CONTEXTO DE MEMORIA ---\n' + parts.join('\n') : ''
+}
+
 // --- Helpers para Super Yo ---
 
 /**
