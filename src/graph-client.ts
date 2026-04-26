@@ -1,7 +1,12 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { CONFIG } from './config.js'
 
-const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+let _supabase: SupabaseClient | null = null
+function supabase(): SupabaseClient {
+  if (_supabase) return _supabase
+  _supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+  return _supabase
+}
 
 // --- Status de contactos (active / muted / ignored) ---
 
@@ -28,7 +33,7 @@ export async function setContactStatus(phone: string, status: ContactStatus): Pr
 
   const mergedProps = { ...(entity.properties || {}), contact_status: status }
 
-  const { error } = await supabase
+  const { error } = await supabase()
     .from('graph_entities')
     .update({
       properties: mergedProps,
@@ -79,7 +84,7 @@ export async function upsertEntity(input: EntityInput): Promise<string> {
   const normalizedName = normalize(input.name)
 
   // Buscar existente
-  const { data: existing } = await supabase
+  const { data: existing } = await supabase()
     .from('graph_entities')
     .select('id, properties, scope')
     .eq('normalized_name', normalizedName)
@@ -106,7 +111,7 @@ export async function upsertEntity(input: EntityInput): Promise<string> {
       updateData.embedding = `[${input.embedding.join(',')}]`
     }
 
-    await supabase
+    await supabase()
       .from('graph_entities')
       .update(updateData)
       .eq('id', existing.id)
@@ -131,7 +136,7 @@ export async function upsertEntity(input: EntityInput): Promise<string> {
     insertData.embedding = `[${input.embedding.join(',')}]`
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabase()
     .from('graph_entities')
     .insert(insertData)
     .select('id')
@@ -146,7 +151,7 @@ export async function upsertEntity(input: EntityInput): Promise<string> {
  */
 export async function upsertLink(input: LinkInput): Promise<string> {
   // Buscar link existente
-  const { data: existing } = await supabase
+  const { data: existing } = await supabase()
     .from('entity_links')
     .select('id, weight')
     .eq('source_id', input.source_id)
@@ -156,7 +161,7 @@ export async function upsertLink(input: LinkInput): Promise<string> {
 
   if (existing) {
     const mergedScopes = [...new Set([...(input.scope || [])])]
-    await supabase
+    await supabase()
       .from('entity_links')
       .update({
         scope: mergedScopes,
@@ -170,7 +175,7 @@ export async function upsertLink(input: LinkInput): Promise<string> {
     return existing.id
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabase()
     .from('entity_links')
     .insert({
       source_id: input.source_id,
@@ -193,7 +198,7 @@ export async function upsertLink(input: LinkInput): Promise<string> {
  * Buscar persona por teléfono
  */
 export async function findEntityByPhone(phone: string): Promise<{ id: string; name: string; properties: Record<string, any> } | null> {
-  const { data } = await supabase
+  const { data } = await supabase()
     .from('graph_entities')
     .select('id, name, properties')
     .eq('entity_type', 'person')
@@ -209,7 +214,7 @@ export async function findEntityByPhone(phone: string): Promise<{ id: string; na
 export async function findEntityByName(name: string, entityType?: string): Promise<{ id: string; name: string; entity_type: string } | null> {
   const normalizedName = normalize(name)
 
-  let query = supabase
+  let query = supabase()
     .from('graph_entities')
     .select('id, name, entity_type')
     .eq('normalized_name', normalizedName)
@@ -224,7 +229,7 @@ export async function findEntityByName(name: string, entityType?: string): Promi
  * Actualizar last_interaction e incrementar weight de links
  */
 export async function updateEntityInteraction(entityId: string): Promise<void> {
-  await supabase
+  await supabase()
     .from('graph_entities')
     .update({
       last_interaction: new Date().toISOString(),
@@ -240,7 +245,7 @@ export async function getEntityNeighbors(
   entityId: string,
   scope?: string
 ): Promise<Array<{ id: string; entity_type: string; name: string; relationship: string; direction: string }>> {
-  const { data, error } = await supabase.rpc('get_entity_neighbors', {
+  const { data, error } = await supabase().rpc('get_entity_neighbors', {
     p_entity_id: entityId,
     p_scope: scope || null,
   })

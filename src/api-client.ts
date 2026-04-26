@@ -1,7 +1,21 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { CONFIG } from './config.js'
 
-const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+// Lazy init: el cliente del CRM legacy solo se necesita en el flujo Baileys
+// (upsertLead, logMessage). Si SUPABASE_URL falta (deploy minimal sin CRM),
+// el módulo se puede importar sin crash; las funciones lanzan al ser invocadas.
+let supabase: SupabaseClient | null = null
+
+function getSupabase(): SupabaseClient {
+  if (supabase) return supabase
+  if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_KEY) {
+    throw new Error(
+      '[api-client] SUPABASE_URL y SUPABASE_KEY requeridos para CRM legacy ops',
+    )
+  }
+  supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+  return supabase
+}
 
 export async function upsertLead(data: {
   phone: string
@@ -11,7 +25,7 @@ export async function upsertLead(data: {
   owner?: string
 }) {
   // Verificar si el lead ya existe
-  const { data: existing } = await supabase
+  const { data: existing } = await getSupabase()
     .from('crm_leads')
     .select('id')
     .eq('phone', data.phone)
@@ -19,7 +33,7 @@ export async function upsertLead(data: {
 
   if (existing) {
     if (data.name) {
-      await supabase
+      await getSupabase()
         .from('crm_leads')
         .update({ name: data.name })
         .eq('phone', data.phone)
@@ -27,7 +41,7 @@ export async function upsertLead(data: {
     return existing
   }
 
-  const { data: newLead, error } = await supabase
+  const { data: newLead, error } = await getSupabase()
     .from('crm_leads')
     .insert({
       phone: data.phone,
@@ -52,13 +66,13 @@ export async function logMessage(data: {
   has_source_code?: boolean
 }) {
   // Buscar lead_id por phone
-  const { data: lead } = await supabase
+  const { data: lead } = await getSupabase()
     .from('crm_leads')
     .select('id')
     .eq('phone', data.contact_phone)
     .single()
 
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('crm_messages')
     .insert({
       lead_id: lead?.id || null,

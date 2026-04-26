@@ -1,9 +1,14 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { CONFIG } from './config.js'
 
 const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_API_KEY)
-const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+let _supabase: SupabaseClient | null = null
+function supabase(): SupabaseClient {
+  if (_supabase) return _supabase
+  _supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+  return _supabase
+}
 
 // Rate limiting: máximo 1 análisis cada 5 segundos para no parecer bot
 let lastAnalysis = 0
@@ -47,7 +52,7 @@ let importantPhonesLoaded = false
 async function loadImportantPhones() {
   if (importantPhonesLoaded) return
   try {
-    const { data } = await supabase
+    const { data } = await supabase()
       .from('graph_entities')
       .select('properties')
       .eq('entity_type', 'person')
@@ -219,7 +224,7 @@ export async function analyzeConversation(
 
   try {
     // Cargar últimos 20 mensajes del hilo desde crm_messages
-    const { data: threadMessages } = await supabase
+    const { data: threadMessages } = await supabase()
       .from('crm_messages')
       .select('content, direction, received_at')
       .eq('contact_phone', phone)
@@ -271,7 +276,7 @@ export async function analyzeConversation(
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
       const key = `${senderName.toLowerCase().replace(/\s+/g, '-')}/${classification.type}-${timestamp}`
 
-      const { error: memError } = await supabase
+      const { error: memError } = await supabase()
         .from('agent_memory')
         .insert({
           source: 'super_yo',
@@ -299,7 +304,7 @@ export async function analyzeConversation(
       const noiseCategory = classification.noise_category || 'other'
 
       // Intentar update primero (más común)
-      const { data: existing } = await supabase
+      const { data: existing } = await supabase()
         .from('communication_metrics')
         .select('id, total_messages, signal_count, noise_count, noise_categories, top_topics')
         .eq('contact_phone', phone)
@@ -320,7 +325,7 @@ export async function analyzeConversation(
           if (topics.length > 5) topics.shift()
         }
 
-        await supabase
+        await supabase()
           .from('communication_metrics')
           .update({
             total_messages: (existing.total_messages || 0) + 1,
@@ -331,7 +336,7 @@ export async function analyzeConversation(
           })
           .eq('id', existing.id)
       } else {
-        await supabase
+        await supabase()
           .from('communication_metrics')
           .insert({
             contact_phone: phone,

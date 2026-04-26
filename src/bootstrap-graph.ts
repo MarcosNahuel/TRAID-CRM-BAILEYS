@@ -12,7 +12,7 @@
 
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'fs'
 import { join, basename } from 'path'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { GoogleGenAI } from '@google/genai'
 import { CONFIG } from './config.js'
 import { parseWhatsAppExport, type ParsedChat } from './whatsapp-parser.js'
@@ -20,7 +20,12 @@ import { upsertEntity, upsertLink } from './graph-client.js'
 import { embedText } from './embeddings.js'
 
 const ai = new GoogleGenAI({ apiKey: CONFIG.GEMINI_API_KEY })
-const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+let _supabase: SupabaseClient | null = null
+function supabase(): SupabaseClient {
+  if (_supabase) return _supabase
+  _supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+  return _supabase
+}
 
 const MODEL = 'gemini-2.0-flash'
 const PROGRESS_FILE = './bootstrap-progress.json'
@@ -198,7 +203,7 @@ async function loadCrmMessages(): Promise<Map<string, ContactData>> {
   const contacts = new Map<string, ContactData>()
 
   // Cargar todos los mensajes agrupados por contacto
-  const { data: messages, error } = await supabase
+  const { data: messages, error } = await supabase()
     .from('crm_messages')
     .select('contact_phone, content, received_at, direction')
     .order('received_at', { ascending: true })
@@ -209,7 +214,7 @@ async function loadCrmMessages(): Promise<Map<string, ContactData>> {
   }
 
   // Cargar nombres de leads
-  const { data: leads } = await supabase
+  const { data: leads } = await supabase()
     .from('crm_leads')
     .select('phone, name')
 
@@ -417,7 +422,7 @@ async function main() {
           'RETRIEVAL_DOCUMENT'
         )
         if (embedding.length) {
-          await supabase
+          await supabase()
             .from('graph_entities')
             .update({ embedding: `[${embedding.join(',')}]` })
             .eq('id', personId)
@@ -442,11 +447,11 @@ async function main() {
   console.log(`Procesados: ${progress.processedContacts.length}/${allContacts.size}`)
 
   // Stats finales
-  const { data: entityCount } = await supabase
+  const { data: entityCount } = await supabase()
     .from('graph_entities')
     .select('entity_type', { count: 'exact', head: true })
 
-  const { data: linkCount } = await supabase
+  const { data: linkCount } = await supabase()
     .from('entity_links')
     .select('id', { count: 'exact', head: true })
 

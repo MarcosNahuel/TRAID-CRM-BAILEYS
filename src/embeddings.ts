@@ -1,9 +1,14 @@
 import { GoogleGenAI } from '@google/genai'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { CONFIG } from './config.js'
 
 const ai = new GoogleGenAI({ apiKey: CONFIG.GEMINI_API_KEY })
-const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+let _supabase: SupabaseClient | null = null
+function supabase(): SupabaseClient {
+  if (_supabase) return _supabase
+  _supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+  return _supabase
+}
 
 const EMBEDDING_MODEL = 'gemini-embedding-2-preview'
 const DIMENSIONS = 768
@@ -54,7 +59,7 @@ export async function embedAndStore(
     if (!content || content.length < 10) return
 
     // Buscar el mensaje más reciente de este contacto
-    const { data: message } = await supabase
+    const { data: message } = await supabase()
       .from('crm_messages')
       .select('id')
       .eq('contact_phone', contactPhone)
@@ -70,7 +75,7 @@ export async function embedAndStore(
     // Formatear como string para pgvector: [0.1, 0.2, ...]
     const vectorStr = `[${embedding.join(',')}]`
 
-    const { error } = await supabase
+    const { error } = await supabase()
       .from('crm_messages')
       .update({ embedding: vectorStr })
       .eq('id', message.id)
