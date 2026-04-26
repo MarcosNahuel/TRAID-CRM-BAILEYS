@@ -32,7 +32,7 @@ export const CONFIG = {
   // WA / contactos
   NACHO_PHONE: process.env.NACHO_PHONE || '',
   NAHUEL_PHONE: process.env.NAHUEL_PHONE || '',
-  NAHUEL_WA_ID: process.env.NAHUEL_WA_ID || '5492617131433',
+  NAHUEL_WA_ID: process.env.NAHUEL_WA_ID || '5492615181225',
 
   // Sessions
   SESSIONS_DIR: process.env.SESSIONS_DIR || './sessions',

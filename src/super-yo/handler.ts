@@ -18,7 +18,7 @@ import {
   dailyBrief,
 } from '../segundo-cerebro/brain.js'
 
-export const NAHUEL_WA_ID = process.env.NAHUEL_WA_ID || '5492617131433'
+export const NAHUEL_WA_ID = process.env.NAHUEL_WA_ID || '5492615181225'
 
 /**
  * Detecta si el mensaje es para el segundo cerebro
