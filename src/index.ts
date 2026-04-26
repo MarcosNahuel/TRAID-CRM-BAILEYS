@@ -98,17 +98,45 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`QR Server en puerto ${PORT}`)
 })
 
+// Resiliencia top-level: en Dokploy/containers minimal, evitar exit por
+// errores en libs externas (Baileys reconnect, fetch wa version, etc).
+process.on('unhandledRejection', (reason) => {
+  console.error('[main] unhandledRejection:', reason)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[main] uncaughtException:', err)
+})
+
 async function main() {
   console.log('Super Yo — WhatsApp Reader + Agent')
-  console.log(`Supabase: ${CONFIG.SUPABASE_URL ? 'conectado' : 'no configurado'}`)
+  console.log(`Supabase CRM: ${CONFIG.SUPABASE_URL ? 'conectado' : 'no configurado'}`)
+  console.log(`Supabase yo:  ${CONFIG.YO_SUPABASE_URL ? 'conectado' : 'no configurado'}`)
+  console.log(`Pipeline yo:  ${CONFIG.YO_PIPELINE_ENABLED ? 'ON' : 'OFF'}`)
   console.log('')
 
-  await mkdir(CONFIG.SESSIONS_DIR, { recursive: true })
+  try {
+    await mkdir(CONFIG.SESSIONS_DIR, { recursive: true })
+  } catch (e) {
+    console.error('[main] mkdir sessions dir:', e)
+  }
 
-  console.log('Iniciando sesión NAHUEL...')
-  await startSession('nahuel', CONFIG.NAHUEL_PHONE, onQR)
+  // WHATSAPP_ENABLED=false permite arrancar el servicio sin Baileys
+  // (útil en deploys donde solo se usa el webhook Meta o el pipeline yo).
+  const waEnabled = process.env.WHATSAPP_ENABLED !== 'false'
+  if (!waEnabled) {
+    console.log('WHATSAPP_ENABLED=false → Baileys session deshabilitada')
+    return
+  }
 
-  console.log('Sesión iniciada. Esperando mensajes...')
+  try {
+    console.log('Iniciando sesión NAHUEL...')
+    await startSession('nahuel', CONFIG.NAHUEL_PHONE, onQR)
+    console.log('Sesión iniciada. Esperando mensajes...')
+  } catch (err) {
+    console.error('[main] startSession falló (no fatal):', err)
+  }
 }
 
-main().catch(console.error)
+main().catch((err) => {
+  console.error('[main] error fatal capturado:', err)
+})
