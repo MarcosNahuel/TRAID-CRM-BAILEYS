@@ -917,7 +917,48 @@ export const crearTaskTool = tool({
 })
 
 /**
- * Export de todos los tools (19)
+ * 20. buscar_conocimiento_yo — Búsqueda semántica en CN sincronizado a Supabase yo
+ */
+export const buscarConocimientoYoTool = tool({
+  description:
+    'Busca semánticamente en la base de conocimiento del usuario (repo CN sincronizado a Supabase yo via GH Action). Devuelve top-K chunks relevantes con source_path, similarity y content. Usar cuando Nahuel pregunte cosas tipo "qué dice el paper sobre X", "evaluación de Y", "cómo se hace Z según mis docs", o necesite contexto de propuestas/standards/brands.',
+  parameters: z.object({
+    query: z.string().describe('Pregunta o búsqueda en lenguaje natural'),
+    k: z.number().optional().default(5).describe('Cantidad de chunks a devolver (1-20)'),
+    category: z.enum(['content','knowledge','standards','brands','propuestas','daparo','root']).optional().describe('Filtrar por categoría/área del repo'),
+  }),
+  execute: async ({ query, k, category }) => {
+    try {
+      const embedding = await embedQuery(query)
+      if (!embedding || embedding.length === 0) {
+        return { success: false, error: 'embedding falló' }
+      }
+      const { getYoSupabase } = await import('../yo/supabase-client.js')
+      const { data, error } = await getYoSupabase().rpc('match_knowledge', {
+        query_embedding: embedding,
+        match_count: k ?? 5,
+        category_filter: category ?? null,
+      })
+      if (error) throw new Error(error.message)
+      return {
+        success: true,
+        count: (data || []).length,
+        results: (data || []).map((r: any) => ({
+          source_path: r.source_path,
+          title: r.title,
+          category: r.category,
+          similarity: Math.round(r.similarity * 1000) / 1000,
+          excerpt: r.content?.slice(0, 400),
+        })),
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  },
+})
+
+/**
+ * Export de todos los tools (20)
  */
 export const superYoTools = {
   consultar_crm: consultarCrmTool,
@@ -939,4 +980,5 @@ export const superYoTools = {
   buscar_memoria: buscarMemoriaTool,
   guardar_memoria: guardarMemoriaTool,
   crear_task: crearTaskTool,
+  buscar_conocimiento_yo: buscarConocimientoYoTool,
 }
