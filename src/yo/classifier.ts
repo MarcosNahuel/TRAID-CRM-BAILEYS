@@ -33,16 +33,30 @@ async function getClient(): Promise<{
 
   const project = process.env.GCP_VERTEX_PROJECT
   const location = process.env.GCP_VERTEX_LOCATION
-  const keyFile = process.env.GCP_VERTEX_SA_JSON_PATH
+  let keyFile = process.env.GCP_VERTEX_SA_JSON_PATH
+  const inlineSa = process.env.GCP_VERTEX_SA_JSON
 
   if (!project || !location) {
     throw new Error(
       '[yo/classifier] Faltan envs: GCP_VERTEX_PROJECT y GCP_VERTEX_LOCATION son obligatorios',
     )
   }
+
+  // Permite pasar SA inline (env var con JSON) — útil para Dokploy/containers
+  // sin volúmenes. Lo escribe a un archivo temporal y usa keyFile.
+  if (!keyFile && inlineSa) {
+    const { writeFileSync, existsSync, mkdirSync } = await import('fs')
+    const { tmpdir } = await import('os')
+    const { join } = await import('path')
+    const dir = join(tmpdir(), 'yo-sa')
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    keyFile = join(dir, 'vertex-sa.json')
+    writeFileSync(keyFile, inlineSa, { encoding: 'utf-8', mode: 0o600 })
+  }
+
   if (!keyFile) {
     throw new Error(
-      '[yo/classifier] Falta GCP_VERTEX_SA_JSON_PATH (path al service account JSON)',
+      '[yo/classifier] Falta GCP_VERTEX_SA_JSON_PATH o GCP_VERTEX_SA_JSON (service account)',
     )
   }
 
