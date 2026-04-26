@@ -9,7 +9,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText, stepCountIs } from 'ai'
 import { checkGuardrails } from './middleware.js'
-import { superYoTools } from './tools.js'
+import { superYoTools, setCurrentUserMessage } from './tools.js'
 import { getSuperYoChatHistory, saveSuperYoMessage, loadAgentContext } from './crm-client.js'
 
 const google = process.env.GEMINI_API_KEY
@@ -168,7 +168,8 @@ export async function generateSuperYoResponse({
     throw new Error('No AI provider configured (GEMINI_API_KEY or OPENAI_API_KEY)')
   }
 
-  const dynamicContext = `\nFecha actual: ${new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`
+  setCurrentUserMessage(mensaje)
+  const dynamicContext = `\nFecha actual: ${new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}\nMensaje exacto del usuario en este turno: "${mensaje.replace(/"/g, '\\"').slice(0, 500)}"`
   const memoryContext = await loadAgentContext(mensaje)
   const systemPrompt = SUPER_YO_SYSTEM_PROMPT + dynamicContext + memoryContext
 

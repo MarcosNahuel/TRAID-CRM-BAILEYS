@@ -22,6 +22,16 @@ async function embedQuery(text: string): Promise<number[]> {
   return embedText(text, 'RETRIEVAL_QUERY')
 }
 
+// Mensaje original del usuario en este turno — fallback para tools cuando el LLM
+// pasa params vacíos (gemini-3.1-flash-lite-preview a veces lo hace en tool calls).
+let _currentUserMessage = ''
+export function setCurrentUserMessage(msg: string) {
+  _currentUserMessage = msg || ''
+}
+function getCurrentUserMessage(): string {
+  return _currentUserMessage
+}
+
 /**
  * 1. consultar_crm — Búsqueda híbrida en mensajes
  */
@@ -908,19 +918,28 @@ Después de crear, confirmá al usuario en una línea: "Anotada (id: <id>). Prio
       urgente: 'urgent', urgent: 'urgent',
     }
     const normPriority = priority ? (priorityMap[priority.toLowerCase()] || 'medium') : 'medium'
-    console.log(`[crear_task] input: content_md="${(content_md || '').slice(0, 80)}" project=${project_slug} priority=${priority}->${normPriority} assigned_to=${assigned_to}`)
-    if (!content_md || content_md.trim().length < 3) {
-      return { success: false, error: 'content_md vacío o muy corto. Tenés que pasar el contenido completo de la task.' }
+    // Fallback: si el LLM pasó content_md vacío, usar el mensaje original del usuario
+    let effectiveContent = content_md
+    if (!effectiveContent || effectiveContent.trim().length < 3) {
+      const orig = getCurrentUserMessage().trim()
+      if (orig.length >= 3) {
+        effectiveContent = orig
+        console.log(`[crear_task] content_md vacío del LLM → fallback al mensaje original del usuario`)
+      } else {
+        console.log(`[crear_task] content_md vacío y no hay mensaje original disponible`)
+        return { success: false, error: 'content_md vacío. Pasá el contenido completo de la task.' }
+      }
     }
+    console.log(`[crear_task] input: content_md="${effectiveContent.slice(0, 80)}" project=${project_slug} priority=${priority}->${normPriority} assigned_to=${assigned_to}`)
     try {
       const { insertTask } = await import('../yo/supabase-client.js')
       const task = await insertTask({
         project_slug: project_slug ?? null,
-        content_md,
+        content_md: effectiveContent,
         source: 'intent',
         priority: normPriority,
         assigned_to: assigned_to ?? null,
-        metadata: { created_via: 'super_yo_intent' },
+        metadata: { created_via: 'super_yo_intent', ...(content_md !== effectiveContent ? { content_fallback: true } : {}) },
       })
       console.log(`[crear_task] OK id=${task.id}`)
       return {
