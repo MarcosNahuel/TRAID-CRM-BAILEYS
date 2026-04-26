@@ -883,7 +883,41 @@ export const guardarMemoriaTool = tool({
 })
 
 /**
- * Export de todos los tools (18)
+ * 19. crear_task — Crear una task en el sistema yo (yo.tasks)
+ */
+export const crearTaskTool = tool({
+  description:
+    'Crea una task en el sistema yo (yo.tasks). Usar cuando Nahuel diga "anotame esta task", "agendame", "agregar pendiente" o equivalente. Responde con el id de la task creada.',
+  parameters: z.object({
+    content_md: z.string().describe('Contenido markdown de la task. Estructurado: título, contexto, pasos.'),
+    project_slug: z.string().optional().describe('Slug del proyecto, ej: super-yo, diego-erp, traid-landing. Null si no aplica.'),
+    priority: z.enum(['low', 'medium', 'high', 'urgent']).optional().default('medium'),
+    assigned_to: z.string().optional().describe('nahuel | nacho | claude | null'),
+  }),
+  execute: async ({ content_md, project_slug, priority, assigned_to }) => {
+    try {
+      const { insertTask } = await import('../yo/supabase-client.js')
+      const task = await insertTask({
+        project_slug: project_slug ?? null,
+        content_md,
+        source: 'intent',
+        priority,
+        assigned_to: assigned_to ?? null,
+        metadata: { created_via: 'super_yo_intent' },
+      })
+      return {
+        success: true,
+        task_id: task.id,
+        message: `Task creada: ${task.id}${project_slug ? ` en ${project_slug}` : ' (untriaged)'}`,
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  },
+})
+
+/**
+ * Export de todos los tools (19)
  */
 export const superYoTools = {
   consultar_crm: consultarCrmTool,
@@ -904,4 +938,5 @@ export const superYoTools = {
   crear_borrador_email: crearBorradorEmailTool,
   buscar_memoria: buscarMemoriaTool,
   guardar_memoria: guardarMemoriaTool,
+  crear_task: crearTaskTool,
 }

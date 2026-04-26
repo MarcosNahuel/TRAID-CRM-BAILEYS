@@ -16,6 +16,7 @@ import { createHmac } from 'crypto'
 import { IncomingMessage, ServerResponse } from 'http'
 import { processSuperYoMessage, NAHUEL_WA_ID } from './super-yo/handler.js'
 import { markAsRead, sendTypingIndicator } from './whatsapp-api.js'
+import { CONFIG } from './config.js'
 
 // Debounce state: waId -> { messages, timer, lastMessageTime }
 const debounceState = new Map<string, {
@@ -94,13 +95,54 @@ function scheduleProcess(waId: string) {
 
     console.log(`[webhook] Procesando batch de ${messages.length} mensaje(s) de ${waId}`)
 
-    // Route: Nahuel → Super Yo, otros → log (Vittoria forward futuro)
+    // Route: Nahuel → Super Yo, otros → pipeline yo (si flag ON), sino log
     if (waId === NAHUEL_WA_ID) {
       await processSuperYoMessage(waId, messages)
+    } else if (CONFIG.YO_PIPELINE_ENABLED) {
+      try {
+        const { processIncomingForYo } = await import('./yo/pipeline.js')
+        const {
+          ensureContact,
+          listProjectsForContact,
+          insertTask,
+          lookupContactByWaId,
+        } = await import('./yo/supabase-client.js')
+        const { classifyMessage } = await import('./yo/classifier.js')
+
+        const combined = messages
+          .map((m) => m.contenido)
+          .join('\n')
+          .trim()
+        if (!combined) {
+          console.log(`[webhook] mensaje vacío de ${waId}, ignorando`)
+          return
+        }
+
+        const task = await processIncomingForYo(
+          { waId, content: combined, source: 'whatsapp' },
+          {
+            lookupContact: lookupContactByWaId,
+            ensureContact,
+            listProjectsForContact,
+            insertTask,
+            classify: classifyMessage,
+          },
+          {
+            activeProjects: CONFIG.YO_ACTIVE_PROJECTS
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
+          }
+        )
+        console.log(
+          `[webhook] yo task creada ${task.id} (project=${task.project_slug ?? 'untriaged'})`
+        )
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('[webhook] yo pipeline error:', msg)
+      }
     } else {
-      // Por ahora solo logueamos mensajes de otros contactos
-      // Vittoria forward se puede agregar después
-      console.log(`[webhook] Mensaje de ${waId} (no es Nahuel) — ignorando por ahora`)
+      console.log(`[webhook] Mensaje de ${waId} (no es Nahuel) — pipeline OFF, ignorando`)
     }
   }, waitMs)
 }
