@@ -900,6 +900,7 @@ Después de crear, confirmá al usuario en una línea: "Anotada (id: <id>). Prio
     assigned_to: z.string().optional().describe('nahuel | nacho | claude | null'),
   }),
   execute: async ({ content_md, project_slug, priority, assigned_to }) => {
+    console.log(`[crear_task] input: content_md="${(content_md || '').slice(0, 60)}..." project=${project_slug} priority=${priority} assigned_to=${assigned_to}`)
     try {
       const { insertTask } = await import('../yo/supabase-client.js')
       const task = await insertTask({
@@ -910,12 +911,14 @@ Después de crear, confirmá al usuario en una línea: "Anotada (id: <id>). Prio
         assigned_to: assigned_to ?? null,
         metadata: { created_via: 'super_yo_intent' },
       })
+      console.log(`[crear_task] OK id=${task.id}`)
       return {
         success: true,
         task_id: task.id,
         message: `Task creada: ${task.id}${project_slug ? ` en ${project_slug}` : ' (untriaged)'}`,
       }
     } catch (err: any) {
+      console.error(`[crear_task] FAIL: ${err?.message || err}`)
       return { success: false, error: err.message }
     }
   },
