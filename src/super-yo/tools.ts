@@ -894,20 +894,31 @@ Si se infiere prioridad (palabras tipo "urgente", "ya", "ahora", "cuando puedas"
 
 Después de crear, confirmá al usuario en una línea: "Anotada (id: <id>). Prioridad <p>. Proyecto <slug>." Sin bullet points.`,
   parameters: z.object({
-    content_md: z.string().describe('Contenido markdown de la task. Estructurado: título, contexto, pasos.'),
-    project_slug: z.string().optional().describe('Slug del proyecto, ej: super-yo, diego-erp, traid-landing. Null si no aplica.'),
-    priority: z.enum(['low', 'medium', 'high', 'urgent']).optional().default('medium'),
-    assigned_to: z.string().optional().describe('nahuel | nacho | claude | null'),
+    content_md: z.string().min(3).describe('OBLIGATORIO. Contenido COMPLETO de la task en texto/markdown — NO un resumen, NO vacío. Si Nahuel dijo "anotame que tengo que llamar a Nacho mañana 10am", el content_md debe ser "Llamar a Nacho mañana 10am" o más completo. Mínimo 3 caracteres.'),
+    project_slug: z.string().nullish().describe('Slug del proyecto, ej: super-yo, diego-erp, traid-landing, sistema-yo. Null o omitir si no aplica.'),
+    priority: z.string().nullish().describe('Prioridad. Acepta español o inglés: baja|low, media|medium|normal, alta|high, urgente|urgent. Default: medium.'),
+    assigned_to: z.string().nullish().describe('nahuel | nacho | claude. Null si no aplica (default).'),
   }),
   execute: async ({ content_md, project_slug, priority, assigned_to }) => {
-    console.log(`[crear_task] input: content_md="${(content_md || '').slice(0, 60)}..." project=${project_slug} priority=${priority} assigned_to=${assigned_to}`)
+    // Normalizar priority español → inglés
+    const priorityMap: Record<string, 'low' | 'medium' | 'high' | 'urgent'> = {
+      baja: 'low', low: 'low',
+      media: 'medium', medium: 'medium', normal: 'medium',
+      alta: 'high', high: 'high',
+      urgente: 'urgent', urgent: 'urgent',
+    }
+    const normPriority = priority ? (priorityMap[priority.toLowerCase()] || 'medium') : 'medium'
+    console.log(`[crear_task] input: content_md="${(content_md || '').slice(0, 80)}" project=${project_slug} priority=${priority}->${normPriority} assigned_to=${assigned_to}`)
+    if (!content_md || content_md.trim().length < 3) {
+      return { success: false, error: 'content_md vacío o muy corto. Tenés que pasar el contenido completo de la task.' }
+    }
     try {
       const { insertTask } = await import('../yo/supabase-client.js')
       const task = await insertTask({
         project_slug: project_slug ?? null,
         content_md,
         source: 'intent',
-        priority,
+        priority: normPriority,
         assigned_to: assigned_to ?? null,
         metadata: { created_via: 'super_yo_intent' },
       })
