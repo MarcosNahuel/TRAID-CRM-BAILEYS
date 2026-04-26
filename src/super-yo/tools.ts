@@ -886,8 +886,13 @@ export const guardarMemoriaTool = tool({
  * 19. crear_task — Crear una task en el sistema yo (yo.tasks)
  */
 export const crearTaskTool = tool({
-  description:
-    'Crea una task en el sistema yo (yo.tasks). Usar cuando Nahuel diga "anotame esta task", "agendame", "agregar pendiente" o equivalente. Responde con el id de la task creada.',
+  description: `Crea una tarea persistente en el sistema yo de Nahuel (tabla yo.tasks en Supabase). Devuelve el id.
+
+Cuándo usarla: cuando Nahuel pide registrar algo que tiene que hacer, recordar o agendar más tarde. La intención puede expresarse de muchas formas en español rioplatense, por ejemplo: "anotame que mañana tengo X", "no me olvides de Y", "agregá pendiente Z", "para el lunes hay que W", "recordame V". Si dudás entre conversación casual y pedido de registrar, registralo — el costo de crear una task de más es bajo, perder un pendiente es alto.
+
+Si se infiere prioridad (palabras tipo "urgente", "ya", "ahora", "cuando puedas"), pasala. Si se infiere proyecto (TRAID, sistema-yo, diego-erp, alex-saas, etc.), pasalo como project_slug. Si Nahuel solo pide la task para él, dejá assigned_to=null o "nahuel".
+
+Después de crear, confirmá al usuario en una línea: "Anotada (id: <id>). Prioridad <p>. Proyecto <slug>." Sin bullet points.`,
   parameters: z.object({
     content_md: z.string().describe('Contenido markdown de la task. Estructurado: título, contexto, pasos.'),
     project_slug: z.string().optional().describe('Slug del proyecto, ej: super-yo, diego-erp, traid-landing. Null si no aplica.'),
@@ -920,8 +925,15 @@ export const crearTaskTool = tool({
  * 20. buscar_conocimiento_yo — Búsqueda semántica en CN sincronizado a Supabase yo
  */
 export const buscarConocimientoYoTool = tool({
-  description:
-    'Busca semánticamente en la base de conocimiento del usuario (repo CN sincronizado a Supabase yo via GH Action). Devuelve top-K chunks relevantes con source_path, similarity y content. Usar cuando Nahuel pregunte cosas tipo "qué dice el paper sobre X", "evaluación de Y", "cómo se hace Z según mis docs", o necesite contexto de propuestas/standards/brands.',
+  description: `Búsqueda semántica (pgvector + embeddings Gemini 768 dim) sobre la knowledge base personal de Nahuel — el repo CONOCIMIENTO-NAHUEL sincronizado a Supabase. Devuelve los top-K chunks más relevantes con source_path, title, category, similarity (0-1) y excerpt.
+
+Contenido del repo: papers técnicos investigados por Nahuel, evaluaciones Tech Radar (ADOPT/TRIAL/ASSESS/HOLD/DROP) de herramientas, standards de calidad, identidad de brand TRAID, perfil profesional de Nahuel (knowledge/institucional/NAHUEL.md, TRAID.md), catálogo de productos TRAID (P1 a P7), propuestas para clientes, runbooks operativos, playbooks de implementación.
+
+Cuándo usarla: SIEMPRE que la pregunta de Nahuel pueda resolverse con su propio material escrito en lugar de tu conocimiento general. Casos típicos: "qué tengo escrito de X", "qué dice mi paper sobre Y", "cuál es mi evaluación de Z", "qué sabés de mí", "resumime quién soy", "qué entrega P5", "cuánto cobra TRAID por W". Aunque la pregunta no use estas palabras exactas, si la respuesta más útil viene del knowledge personal, usala.
+
+NO la uses para: chitchat, preguntas matemáticas, definiciones de cultura general, traducción simple. Para esas no hace falta tool.
+
+Después de obtener resultados: en la respuesta final, citá entre paréntesis los source_path de los 2-3 chunks que más usaste. Mencioná similarity solo si es < 0.5 (señal de que el match puede no ser preciso).`,
   parameters: z.object({
     query: z.string().describe('Pregunta o búsqueda en lenguaje natural'),
     k: z.number().optional().default(5).describe('Cantidad de chunks a devolver (1-20)'),

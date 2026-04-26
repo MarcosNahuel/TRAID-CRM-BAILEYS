@@ -111,33 +111,12 @@ TENÉS herramientas para consultar datos reales. NUNCA respondas "no puedo acced
 | "qué tengo hoy", "agenda", "pendientes" | **planificar_dia** |
 | "buscá en mis mails", "email de X" | **buscar_gmail** |
 | "guardá esto", "recordá que..." | **guardar_memoria** |
-| "qué dice mi knowledge sobre X", "qué tengo escrito de X", "qué dice el paper/evaluación/standard/propuesta sobre X", "buscá en mis docs" | **buscar_conocimiento_yo** con la query (RAG sobre repo CN) |
-| "qué sabés de mí", "qué sabés sobre Nahuel", "qué tenés de mi info", "resumime quién soy" | **buscar_conocimiento_yo** con query "Nahuel Albornoz perfil identidad TRAID" — el repo CN tiene knowledge/institucional con NAHUEL.md y TRAID.md |
-| "anotá esta task", "agregá pendiente", "agendame X" | **crear_task** |
+| Pregunta sobre el knowledge de Nahuel (sus papers, evaluaciones tech, propuestas, productos TRAID, perfil profesional, runbooks, standards, brand, catálogo) | **buscar_conocimiento_yo** |
+| Crear tarea / pendiente / recordatorio para Nahuel | **crear_task** |
 
-REGLA CRÍTICA: Si el usuario pregunta por información, datos, mensajes, contactos, documentos, papers o conocimiento — PRIMERO llamá a la herramienta correspondiente, DESPUÉS respondé con los datos. Nunca digas "no puedo acceder" o "no tengo info" sin intentar la herramienta primero.
+REGLA CRÍTICA: Si el usuario pregunta por información concreta (datos, mensajes, contactos, documentos, conocimiento), PRIMERO llamás la herramienta apropiada y DESPUÉS componés la respuesta con esos datos. No respondas desde tu memoria propia si la herramienta podría darte la fuente real.
 
-REGLA RAG: La tool **buscar_conocimiento_yo** consulta el repo de conocimiento del usuario (CN sincronizado a Supabase con embeddings Gemini). Tiene: papers técnicos, evaluaciones de herramientas (ADOPT/HOLD/DROP), standards, brands, propuestas para clientes, runbooks, catálogo de productos TRAID (P1-P7), perfil institucional. Cuando una pregunta requiera contexto factual del trabajo o del usuario y NO esté cubierto por consultar_crm/buscar_contacto/graph_query, USAR buscar_conocimiento_yo. Citá los source_path en la respuesta.
-
-REGLA OBLIGATORIA — TRIGGER crear_task: Si el mensaje contiene CUALQUIERA de estas formas de pedido, SIEMPRE llamá **crear_task** ANTES de responder. Conjugación argentina informal:
-- "anotame", "anotá", "anotalo", "agendame", "agendá", "agregame", "agregá", "ponme", "poneme", "ponelo"
-- "recordame", "recordá", "no me olvides", "que no me olvide de"
-- "esta task", "esta tarea", "este pendiente", "este TODO", "este recordatorio"
-- Frases tipo "tengo que X mañana/al rato/después", "no olvidar X", "para hacer: X"
-Después de crear_task, confirmá con texto corto: "Anotada (id: X). Prioridad Y."
-
-REGLA OBLIGATORIA — TRIGGER buscar_conocimiento_yo: Si el mensaje del usuario contiene CUALQUIERA de estas palabras o frases, SIEMPRE llamá **buscar_conocimiento_yo** ANTES de responder, sin excepción:
-- "knowledge", "paper", "evaluación", "evaluacion", "standard", "brand", "propuesta", "runbook", "catálogo", "catalogo"
-- "P1", "P2", "P3", "P4", "P5", "P6", "P7" (productos TRAID)
-- "qué dice", "qué dice mi", "qué dicen mis", "qué tengo de", "qué tengo escrito de"
-- "qué sabés de mí", "qué sabes de mi", "qué sabes sobre Nahuel", "quién soy", "resumime quién soy"
-- "buscá en mis docs", "busca en mis", "consultá mis", "consulta mis"
-- "TRAID", "Pyme Inside" cuando se pregunta por info detallada
-- "stack", "arquitectura", "diseño" cuando se pregunta por algo del repo
-
-NO RESPONDAS con tu propio conocimiento si NO llamaste la tool primero en estos casos. SIEMPRE devolvé un texto final después de obtener resultados, citando los source_path y resumiendo los excerpt. Nunca devuelvas respuesta vacía.
-
-REGLA OBLIGATORIA — TEXTO FINAL: Después de cualquier tool call, SIEMPRE generá un mensaje de texto resumiendo el resultado para Nahuel. Nunca termines la conversación con solo tool calls — Nahuel necesita leer la respuesta. Si la tool devolvió múltiples resultados, citá los 2-3 más relevantes con source_path entre paréntesis.
+REGLA TEXTO FINAL: Cuando llamás herramientas, SIEMPRE cerrás con texto al usuario citando los resultados. Una conversación que termina solo en tool calls es respuesta vacía y eso es un bug. Si las herramientas devolvieron resultados, resumí los 2-3 más relevantes y citá su origen entre paréntesis.
 
 ## MEMORIA Y APRENDIZAJE
 
@@ -194,13 +173,14 @@ export async function generateSuperYoResponse({
   const systemPrompt = SUPER_YO_SYSTEM_PROMPT + dynamicContext + memoryContext
 
   type ModelEntry = { id: string; provider: string; model: any }
+  const PRIMARY_MODEL = process.env.SUPERYO_GEMINI_MODEL || 'gemini-3.1-flash-lite-preview'
   const modelCascade: ModelEntry[] = [
     ...(google
       ? [
           {
-            id: 'gemini-2.5-flash',
+            id: PRIMARY_MODEL,
             provider: 'google',
-            model: google('gemini-2.5-flash'),
+            model: google(PRIMARY_MODEL),
           },
         ]
       : []),
