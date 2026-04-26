@@ -119,6 +119,19 @@ REGLA CRÍTICA: Si el usuario pregunta por información, datos, mensajes, contac
 
 REGLA RAG: La tool **buscar_conocimiento_yo** consulta el repo de conocimiento del usuario (CN sincronizado a Supabase con embeddings Gemini). Tiene: papers técnicos, evaluaciones de herramientas (ADOPT/HOLD/DROP), standards, brands, propuestas para clientes, runbooks, catálogo de productos TRAID (P1-P7), perfil institucional. Cuando una pregunta requiera contexto factual del trabajo o del usuario y NO esté cubierto por consultar_crm/buscar_contacto/graph_query, USAR buscar_conocimiento_yo. Citá los source_path en la respuesta.
 
+REGLA OBLIGATORIA — TRIGGER WORDS: Si el mensaje del usuario contiene CUALQUIERA de estas palabras o frases, SIEMPRE llamá **buscar_conocimiento_yo** ANTES de responder, sin excepción:
+- "knowledge", "paper", "evaluación", "evaluacion", "standard", "brand", "propuesta", "runbook", "catálogo", "catalogo"
+- "P1", "P2", "P3", "P4", "P5", "P6", "P7" (productos TRAID)
+- "qué dice", "qué dice mi", "qué dicen mis", "qué tengo de", "qué tengo escrito de"
+- "qué sabés de mí", "qué sabes de mi", "qué sabes sobre Nahuel", "quién soy", "resumime quién soy"
+- "buscá en mis docs", "busca en mis", "consultá mis", "consulta mis"
+- "TRAID", "Pyme Inside" cuando se pregunta por info detallada
+- "stack", "arquitectura", "diseño" cuando se pregunta por algo del repo
+
+NO RESPONDAS con tu propio conocimiento si NO llamaste la tool primero en estos casos. SIEMPRE devolvé un texto final después de obtener resultados, citando los `source_path` y resumiendo los `excerpt`. Nunca devuelvas respuesta vacía.
+
+REGLA OBLIGATORIA — TEXTO FINAL: Después de cualquier tool call, SIEMPRE generá un mensaje de texto resumiendo el resultado para Nahuel. Nunca termines la conversación con solo tool calls — Nahuel necesita leer la respuesta. Si la tool devolvió múltiples resultados, citá los 2-3 más relevantes con source_path entre paréntesis.
+
 ## MEMORIA Y APRENDIZAJE
 
 Tenés acceso a memorias persistentes que se cargan automáticamente al inicio de cada conversación. Usalas para dar respuestas con contexto.
@@ -210,12 +223,29 @@ export async function generateSuperYoResponse({
       let finalText = result.text
       if (finalText) checkGuardrails(finalText)
       if (!finalText?.trim() && result.steps && result.steps.length > 0) {
-        const toolSummary = result.steps
-          .flatMap((s: any) => s.toolResults || [])
-          .map((tr: any) => tr.result?.message || '')
-          .filter(Boolean)
-          .join('; ')
-        finalText = toolSummary || 'Listo, procesado.'
+        // Compose fallback from tool results: prefer .message, then summarize buscar_conocimiento_yo / consultar_crm results
+        const toolResults = result.steps.flatMap((s: any) => s.toolResults || [])
+        const messages = toolResults.map((tr: any) => tr.result?.message).filter(Boolean)
+
+        // Knowledge results: cite paths + excerpt
+        const kResults = toolResults
+          .filter((tr: any) => tr.toolName === 'buscar_conocimiento_yo' && tr.result?.success && Array.isArray(tr.result?.results))
+          .flatMap((tr: any) => tr.result.results.slice(0, 3))
+        const kSummary = kResults.length
+          ? '*Encontré en tu knowledge:*\n' +
+            kResults
+              .map((r: any) => `• ${r.source_path} (sim ${r.similarity})\n  ${(r.excerpt || '').slice(0, 220).replace(/\n+/g, ' ')}`)
+              .join('\n')
+          : ''
+
+        // CRM results
+        const crmResults = toolResults
+          .filter((tr: any) => tr.toolName === 'consultar_crm' && tr.result?.success)
+          .map((tr: any) => `${tr.result.count || 0} mensajes encontrados${tr.result.contact ? ` con ${tr.result.contact}` : ''}`)
+
+        finalText =
+          [messages.join('; '), kSummary, crmResults.join('; ')].filter(Boolean).join('\n\n') ||
+          'Listo, procesado.'
       }
 
       const toolsUsed =
