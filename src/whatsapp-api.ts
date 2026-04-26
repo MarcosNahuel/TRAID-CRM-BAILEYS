@@ -57,8 +57,26 @@ export interface WhatsAppTextMessage {
 
 /**
  * Enviar mensaje de texto
+ *
+ * Si SUPERYO_SEND_WEBHOOK está seteado, delega el envío a un webhook n8n
+ * (que mantiene la credencial WA Cloud API centralizada). Sino, fallback
+ * a fetch directo a Meta Graph API usando WHATSAPP_ACCESS_TOKEN local.
  */
 export async function sendTextMessage({ to, text }: WhatsAppTextMessage) {
+  const bridgeUrl = process.env.SUPERYO_SEND_WEBHOOK
+  if (bridgeUrl) {
+    const res = await fetch(bridgeUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, text }),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`SUPERYO_SEND_WEBHOOK ${res.status}: ${body.slice(0, 200)}`)
+    }
+    return res.json().catch(() => ({ status: 'sent' }))
+  }
+
   const response = await whatsappFetch(
     `https://graph.facebook.com/${API_VERSION}/${getPhoneNumberId()}/messages`,
     {
@@ -84,6 +102,7 @@ export async function sendTextMessage({ to, text }: WhatsAppTextMessage) {
  * Mark as read (blue checkmarks)
  */
 export async function markAsRead(messageId: string) {
+  if (process.env.SUPERYO_SEND_WEBHOOK) return  // bridge mode: skip (n8n maneja UX read)
   await whatsappFetch(
     `https://graph.facebook.com/${API_VERSION}/${getPhoneNumberId()}/messages`,
     {
@@ -105,6 +124,7 @@ export async function markAsRead(messageId: string) {
  * Send typing indicator
  */
 export async function sendTypingIndicator(to: string) {
+  if (process.env.SUPERYO_SEND_WEBHOOK) return  // bridge mode: skip
   await whatsappFetch(
     `https://graph.facebook.com/${API_VERSION}/${getPhoneNumberId()}/messages`,
     {
