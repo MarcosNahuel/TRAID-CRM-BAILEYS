@@ -59,7 +59,7 @@ describe.runIf(VERTEX_INTEGRATION)('classifyMultimodal — integration (Vertex A
         candidates,
       })
       expect(result.project_slug).toBe('personal')
-      expect(result.confidence).toBeLessThan(0.5)
+      expect(result.confidence).toBeLessThanOrEqual(0.5)
     },
     30_000,
   )

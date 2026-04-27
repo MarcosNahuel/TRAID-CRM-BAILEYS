@@ -8,7 +8,7 @@
 
 import type { ClassifyInput, ClassifyResult, Priority, TaskType } from './types.js'
 
-const MODEL = 'gemini-3.1-flash-lite-preview'
+const MODEL = 'gemini-2.5-flash-lite'
 
 let cachedClient: unknown = null
 

@@ -25,7 +25,7 @@ export type SkippedResult = { skipped: true; reason: 'contact_is_personal' | 'gr
 export type ProcessResult = YoTask | SkippedResult
 
 const CONF_HIGH = 0.8
-const MODEL_NAME = 'gemini-3.1-flash-lite-preview'
+const MODEL_NAME = 'gemini-2.5-flash-lite'
 
 export async function processIncomingForYo(
   msg: IncomingForYo,
