@@ -164,7 +164,7 @@ function scheduleProcess(waId: string) {
           insertTask,
           lookupContactByWaId,
         } = await import('./yo/supabase-client.js')
-        const { classifyMessage } = await import('./yo/classifier.js')
+        const { classifyMultimodal } = await import('./yo/classifier.js')
 
         const combined = messages
           .map((m) => m.contenido)
@@ -175,14 +175,14 @@ function scheduleProcess(waId: string) {
           return
         }
 
-        const task = await processIncomingForYo(
+        const result = await processIncomingForYo(
           { waId, content: combined, source: 'whatsapp' },
           {
             lookupContact: lookupContactByWaId,
             ensureContact,
             listProjectsForContact,
             insertTask,
-            classify: classifyMessage,
+            classify: classifyMultimodal,
           },
           {
             activeProjects: CONFIG.YO_ACTIVE_PROJECTS
@@ -191,9 +191,13 @@ function scheduleProcess(waId: string) {
               .filter(Boolean),
           }
         )
-        console.log(
-          `[webhook] yo task creada ${task.id} (project=${task.project_slug ?? 'untriaged'})`
-        )
+        if ('skipped' in result) {
+          console.log(`[webhook] yo pipeline skip — reason=${result.reason}`)
+        } else {
+          console.log(
+            `[webhook] yo task creada ${result.id} (project=${result.project_slug ?? 'untriaged'})`
+          )
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
         console.error('[webhook] yo pipeline error:', msg)

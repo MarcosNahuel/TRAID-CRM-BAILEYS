@@ -9,6 +9,7 @@ export interface YoContact {
   name: string | null
   kind: 'client' | 'internal' | 'unknown'
   requires_llm_classification: boolean
+  is_personal: boolean
   notes: string | null
   created_at: string
   updated_at: string
@@ -29,10 +30,26 @@ export interface YoTask {
   closed_at: string | null
 }
 
+export type Priority = 'low' | 'medium' | 'high' | 'urgent'
+export type TaskType = 'task' | 'info' | 'decision' | 'blocker' | 'memory'
+
 export interface ClassifyResult {
   project_slug: string | null
   confidence: number
+  priority?: Priority
+  task_type?: TaskType
+  group_slug?: string | null
+  due_at?: string | null          // ISO 8601
+  estimated_minutes?: number | null
+  tags?: string[]
   raw?: unknown
+}
+
+export interface ClassifyInput {
+  text?: string
+  audioBase64?: string
+  audioMimeType?: string          // e.g. 'audio/ogg', 'audio/mpeg'
+  candidates: string[]
 }
 
 export interface InsertTaskInput {
@@ -40,6 +57,11 @@ export interface InsertTaskInput {
   content_md: string
   source: YoTask['source']
   priority?: YoTask['priority']
+  task_type?: TaskType
+  due_at?: string | null
+  estimated_minutes?: number | null
+  tags?: string[]
+  classification_confidence?: number | null
   assigned_to?: string | null
   created_by_contact_id?: string | null
   metadata?: Record<string, unknown>
@@ -50,5 +72,6 @@ export interface PipelineDeps {
   ensureContact: (waId: string, defaults?: Partial<YoContact>) => Promise<YoContact>
   listProjectsForContact: (contactId: string) => Promise<string[]>
   insertTask: (input: InsertTaskInput) => Promise<YoTask>
-  classify: (text: string, candidates: string[]) => Promise<ClassifyResult>
+  classify: (input: ClassifyInput) => Promise<ClassifyResult>
+  checkGroupMuted?: (groupId: string) => Promise<boolean>
 }
