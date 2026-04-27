@@ -138,7 +138,7 @@ export function bufferMessage(
 interface MessageClassification {
   layer: 0 | 1 | 2
   project_tag: string | null
-  type: 'decision' | 'action_item' | 'info' | 'blocker' | 'payment' | 'noise'
+  type: 'decision' | 'action_item' | 'info' | 'blocker' | 'payment' | 'noise' | 'confirmation'
   summary: string
   entities: string[]
   urgency: 'low' | 'medium' | 'high'
@@ -182,20 +182,29 @@ TU TAREA: Clasificar el mensaje en una de 3 capas y extraer metadata.
 CAPAS:
 - layer 0 (ESTRATÉGICA): Decisiones de negocio, financiero, pivotes, modelo de negocio, partnerships. Afecta a toda la empresa.
 - layer 1 (PROYECTO): Decisiones técnicas, bugs, features, estado de un cliente específico. Afecta a un proyecto.
-- layer 2 (CONVERSACIONAL): "jaja", "dale", "ok", saludos, reacciones, confirmaciones cortas. Ruido.
+- layer 2 (CONVERSACIONAL): "jaja", "dale", saludos, reacciones, fillers. Ruido sin acción.
+
+TIPOS:
+- confirmation: el contacto confirma que algo funciona o está listo. Ejemplos: "ok funciona", "perfecto", "listo", "si esta bien", "gracias funciono", "todo bien", "lo vi esta ok", "confirmo", "recibido". SIEMPRE incluir project_tag si el contexto lo permite.
+- decision: decisión tomada de negocio o técnica
+- action_item: tarea a realizar
+- info: información sin acción
+- blocker: bloqueo en un proyecto
+- payment: relacionado a cobro o pago
+- noise: reacciones, fillers, off-topic sin acción
 
 REGLAS:
 - Si contiene keywords estratégicas → layer 0, project_tag null
 - Si menciona un cliente/proyecto específico con info sustancial → layer 1 con su project_tag
-- Si es confirmación, reacción, filler, o menos de 5 palabras → layer 2
-- type "noise" SOLO para layer 2
+- Si el mensaje es una confirmación de que algo funciona/está ok → type "confirmation", layer 1 (o layer 2 si no hay contexto de proyecto)
+- Si es reacción pura, filler sin confirmación de tarea → layer 2, type "noise"
 - urgency "high" si hay plata pendiente, deadline, o blocker
 
 Respondé SOLO JSON válido:
 {
   "layer": 0|1|2,
   "project_tag": "string o null",
-  "type": "decision|action_item|info|blocker|payment|noise",
+  "type": "decision|action_item|info|blocker|payment|noise|confirmation",
   "summary": "resumen conciso para Claude Code",
   "entities": ["nombres mencionados"],
   "urgency": "low|medium|high",
@@ -294,6 +303,38 @@ export async function analyzeConversation(
         console.error('[brain] Error writing agent_memory:', memError.message)
       } else {
         console.log(`[brain] Memoria guardada: ${key} (layer ${classification.layer})`)
+      }
+    }
+
+    // Paso 2b: Si es confirmación, cerrar el ticket más reciente en resolved en yo.tasks
+    if (classification.type === 'confirmation' && classification.project_tag) {
+      try {
+        const { data: resolvedTask } = await supabase
+          .schema('yo')
+          .from('tasks')
+          .select('id, content_md')
+          .eq('status', 'resolved')
+          .eq('project_slug', classification.project_tag)
+          .order('resolved_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (resolvedTask) {
+          await supabase
+            .schema('yo')
+            .from('tasks')
+            .update({
+              status: 'confirmed',
+              confirmed_at: new Date().toISOString(),
+            })
+            .eq('id', resolvedTask.id)
+
+          console.log(`[brain] task ${resolvedTask.id} confirmed — ${senderName} (${phone}) confirmó "${resolvedTask.content_md?.substring(0, 60)}"`)
+        } else {
+          console.log(`[brain] confirmation de ${senderName} pero no hay tareas en resolved para ${classification.project_tag}`)
+        }
+      } catch (confirmErr) {
+        console.error('[brain] Error confirmando tarea:', confirmErr)
       }
     }
 
