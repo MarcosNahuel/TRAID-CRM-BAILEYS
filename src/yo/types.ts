@@ -50,6 +50,7 @@ export interface ClassifyInput {
   audioBase64?: string
   audioMimeType?: string          // e.g. 'audio/ogg', 'audio/mpeg'
   candidates: string[]
+  group_candidates?: string[]     // slugs de grupos WA válidos para group_slug
 }
 
 export interface InsertTaskInput {

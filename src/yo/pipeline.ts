@@ -1,6 +1,6 @@
 /**
  * Pipeline orquestador del sistema yo.
- * Lookup contacto → mute/is_personal check → classify multimodal → INSERT task + audit.
+ * Lookup contacto → mute/is_personal check → classify SIEMPRE multimodal → INSERT task + audit.
  */
 
 import type { PipelineDeps, YoTask, InsertTaskInput } from './types.js'
@@ -25,6 +25,7 @@ export type SkippedResult = { skipped: true; reason: 'contact_is_personal' | 'gr
 export type ProcessResult = YoTask | SkippedResult
 
 const CONF_HIGH = 0.8
+const MODEL_NAME = 'gemini-3.1-flash-lite-preview'
 
 export async function processIncomingForYo(
   msg: IncomingForYo,
@@ -51,49 +52,33 @@ export async function processIncomingForYo(
   }
 
   const projects = await deps.listProjectsForContact(contact.id)
-  const metadata: Record<string, unknown> = { wa_id: msg.waId }
-  let project_slug: string | null = null
-
-  if (!contact.requires_llm_classification) {
-    if (projects.length === 1) {
-      project_slug = projects[0]
-    } else if (projects.length > 1) {
-      metadata.untriaged_reason = 'multiple_projects_no_llm'
-      metadata.candidate_projects = projects
-    } else {
-      metadata.untriaged_reason = 'unknown_contact'
-    }
-
-    const input: InsertTaskInput = {
-      project_slug,
-      content_md: msg.content,
-      source: msg.source,
-      created_by_contact_id: contact.id,
-      metadata,
-    }
-    return deps.insertTask(input)
-  }
-
-  // LLM classify path
   const candidates = projects.length ? projects : (opts.activeProjects ?? [])
+  const group_candidates = msg.groupId ? [msg.groupId] : []
+  const metadata: Record<string, unknown> = { wa_id: msg.waId }
+
   const t0 = Date.now()
   let classifyError: string | null = null
-  let classifyResult = await (async () => {
+  const classifyResult = await (async () => {
     try {
       return await deps.classify({
         text: msg.content || undefined,
         audioBase64: msg.audioBase64,
         audioMimeType: msg.audioMimeType,
         candidates,
+        group_candidates,
       })
     } catch (err) {
       classifyError = (err as Error).message
-      return { project_slug: 'personal' as string | null, confidence: 0 }
+      // Fallback: 1 candidato → asignar con confianza alta; múltiples → inbox personal
+      return {
+        project_slug: candidates.length === 1 ? candidates[0] : null,
+        confidence: candidates.length === 1 ? CONF_HIGH : 0,
+      }
     }
   })()
   const latency_ms = Date.now() - t0
 
-  // Threshold: ≥0.8 → asignar; <0.8 → personal
+  let project_slug: string | null = null
   if (
     classifyResult.project_slug &&
     classifyResult.project_slug !== 'personal' &&
@@ -101,27 +86,30 @@ export async function processIncomingForYo(
   ) {
     project_slug = classifyResult.project_slug
   } else {
-    project_slug = 'personal'
+    project_slug = candidates.length > 0 ? 'personal' : null
   }
 
   metadata.classification = {
-    model: 'gemini-2.5-flash',
+    model: MODEL_NAME,
     candidates,
+    group_candidates,
     decision_slug: classifyResult.project_slug,
+    group_slug: classifyResult.group_slug ?? null,
     confidence: classifyResult.confidence,
     fallback: project_slug === 'personal' ? 'personal' : null,
     latency_ms,
+    ...(classifyError ? { error: classifyError } : {}),
   }
 
   const input: InsertTaskInput = {
     project_slug,
     content_md: msg.audioBase64 ? (msg.content || '[audio]') : msg.content,
     source: msg.source,
-    priority: ('priority' in classifyResult ? classifyResult.priority : undefined) ?? 'medium',
-    task_type: ('task_type' in classifyResult ? classifyResult.task_type : undefined) ?? 'task',
-    due_at: ('due_at' in classifyResult ? classifyResult.due_at : undefined) ?? null,
-    estimated_minutes: ('estimated_minutes' in classifyResult ? classifyResult.estimated_minutes : undefined) ?? null,
-    tags: ('tags' in classifyResult ? classifyResult.tags : undefined) ?? [],
+    priority: classifyResult.priority ?? 'medium',
+    task_type: classifyResult.task_type ?? 'task',
+    due_at: classifyResult.due_at ?? null,
+    estimated_minutes: classifyResult.estimated_minutes ?? null,
+    tags: classifyResult.tags ?? [],
     classification_confidence: classifyResult.confidence,
     created_by_contact_id: contact.id,
     metadata,
@@ -136,7 +124,7 @@ export async function processIncomingForYo(
       source: msg.audioBase64 ? 'whatsapp_audio' : 'whatsapp_text',
       input_excerpt: (msg.content || '').slice(0, 500),
       candidates,
-      model: 'gemini-2.5-flash',
+      model: MODEL_NAME,
       decision_slug: classifyResult.project_slug,
       confidence: classifyResult.confidence,
       fallback_used: project_slug === 'personal' ? 'personal' : null,

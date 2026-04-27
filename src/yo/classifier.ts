@@ -2,13 +2,13 @@
  * Sistema yo — Vertex AI classifier multimodal (texto + audio).
  *
  * Auth: Service Account via GCP_VERTEX_SA_JSON (inline) o GCP_VERTEX_SA_JSON_PATH (file).
- * Modelo: gemini-2.5-flash sobre Vertex AI (apiVersion v1).
- * Soporta audio inline ≤20MB (Vertex limit). Para mayor, usar GCS URI (futuro).
+ * Modelo: gemini-3.1-flash-lite-preview sobre Vertex AI (apiVersion v1).
+ * Soporta audio inline ≤20MB (Vertex limit).
  */
 
 import type { ClassifyInput, ClassifyResult, Priority, TaskType } from './types.js'
 
-const MODEL = 'gemini-2.5-flash'
+const MODEL = 'gemini-3.1-flash-lite-preview'
 
 let cachedClient: unknown = null
 
@@ -54,18 +54,28 @@ async function getClient(): Promise<{
   return cachedClient as never
 }
 
-function buildSystemPrompt(candidates: string[]): string {
-  return [
+function buildSystemPrompt(projectCandidates: string[], groupCandidates: string[]): string {
+  const lines = [
     'Sos un clasificador de mensajes para un sistema de tareas personales.',
-    'Dado un mensaje (texto o transcripción de audio), clasificá contra los candidatos y devolvé schema JSON estricto.',
+    'Dado un mensaje (texto o transcripción de audio), clasificá y devolvé schema JSON estricto.',
     '',
     'Candidatos válidos para project_slug:',
-    ...candidates.map((c) => `- ${c}`),
+    ...projectCandidates.map((c) => `- ${c}`),
     '- personal  (fallback explícito si nada encaja con confianza)',
     '',
-    'Devolvé EXACTAMENTE este JSON:',
+  ]
+
+  if (groupCandidates.length > 0) {
+    lines.push('Candidatos válidos para group_slug (grupo WhatsApp de origen):')
+    groupCandidates.forEach((g) => lines.push(`- ${g}`))
+    lines.push('')
+  }
+
+  lines.push(
+    'Devolvé EXACTAMENTE este JSON (sin prosa fuera del JSON):',
     '{',
-    '  "project_slug": "<uno-de-candidatos-o-personal>",',
+    '  "project_slug": "<uno-de-project_candidates-o-personal>",',
+    `  "group_slug": ${groupCandidates.length > 0 ? '"<uno-de-group_candidates-o-null>"' : 'null'},`,
     '  "confidence": <0..1>,',
     '  "priority": "low|medium|high|urgent",',
     '  "task_type": "task|info|decision|blocker|memory",',
@@ -79,8 +89,10 @@ function buildSystemPrompt(candidates: string[]): string {
     '- Si nada encaja con confidence ≥0.5, devolvé project_slug=\'personal\' con confidence baja.',
     '- priority \'urgent\' solo si hay deadline explícito <24h.',
     '- task_type \'memory\' si el mensaje es información a recordar (no una acción).',
-    '- NO agregues prosa fuera del JSON.',
-  ].join('\n')
+    '- group_slug: null si el campo group_candidates está vacío o no aplica.',
+  )
+
+  return lines.join('\n')
 }
 
 function safeParse(text: string): Record<string, unknown> | null {
@@ -121,10 +133,10 @@ function normalizeTaskType(v: unknown): TaskType {
 
 /**
  * Classifier multimodal — texto y/o audio inline.
- * Si ningún candidate matchea con confidence ≥0.5, retorna project_slug='personal'.
+ * Siempre clasifica: project_slug, group_slug, priority, task_type, due_at, estimated_minutes, tags.
  */
 export async function classifyMultimodal(input: ClassifyInput): Promise<ClassifyResult> {
-  const { text, audioBase64, audioMimeType, candidates } = input
+  const { text, audioBase64, audioMimeType, candidates, group_candidates = [] } = input
 
   if (!text && !audioBase64) {
     throw new Error('classifyMultimodal: provide text or audio')
@@ -150,7 +162,7 @@ export async function classifyMultimodal(input: ClassifyInput): Promise<Classify
     model: MODEL,
     contents: [{ role: 'user', parts }],
     config: {
-      systemInstruction: buildSystemPrompt(candidates),
+      systemInstruction: buildSystemPrompt(candidates, group_candidates),
       temperature: 0,
       responseMimeType: 'application/json',
     },
@@ -165,12 +177,21 @@ export async function classifyMultimodal(input: ClassifyInput): Promise<Classify
   const slug =
     typeof slugRaw === 'string' && allowed.includes(slugRaw) ? slugRaw : 'personal'
 
+  const groupSlugRaw = parsed.group_slug
+  const group_slug =
+    group_candidates.length > 0 &&
+    typeof groupSlugRaw === 'string' &&
+    group_candidates.includes(groupSlugRaw)
+      ? groupSlugRaw
+      : null
+
   const confidence = clamp01(parsed.confidence)
   const tagsRaw = Array.isArray(parsed.tags) ? parsed.tags : []
   const tags = tagsRaw.filter((t: unknown) => typeof t === 'string').slice(0, 4) as string[]
 
   return {
     project_slug: slug,
+    group_slug,
     confidence,
     priority: normalizePriority(parsed.priority),
     task_type: normalizeTaskType(parsed.task_type),
