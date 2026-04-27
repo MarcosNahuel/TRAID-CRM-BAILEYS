@@ -220,16 +220,23 @@ export async function generateSuperYoResponse({
       : []),
   ]
 
-  for (let i = 0; i < modelCascade.length; i++) {
-    const { id: modelId, provider, model } = modelCascade[i]
+  // Expandir cascade: cada provider intenta primero CON tools, luego SIN tools.
+  // Vertex AI a veces rechaza schemas de tools complejas — sin tools responde igual.
+  type RetryStep = ModelEntry & { useTools: boolean }
+  const fullCascade: RetryStep[] = modelCascade.flatMap((m) => [
+    { ...m, useTools: true },
+    { ...m, useTools: false },
+  ])
+
+  for (let i = 0; i < fullCascade.length; i++) {
+    const { id: modelId, provider, model, useTools } = fullCascade[i]
     try {
-      console.log(`[super-yo] Intentando ${provider}/${modelId}...`)
+      console.log(`[super-yo] Intentando ${provider}/${modelId} (tools=${useTools})...`)
       const result = await generateText({
         model,
         system: systemPrompt,
         messages,
-        tools: superYoTools,
-        stopWhen: stepCountIs(10),
+        ...(useTools ? { tools: superYoTools, stopWhen: stepCountIs(10) } : {}),
       })
 
       let finalText = result.text
@@ -285,10 +292,10 @@ export async function generateSuperYoResponse({
       }
     } catch (err: any) {
       console.error(
-        `[super-yo] ${provider}/${modelId} falló:`,
-        err.message?.substring(0, 200)
+        `[super-yo] ${provider}/${modelId} (tools=${useTools}) falló:`,
+        err.message?.substring(0, 300)
       )
-      if (i === modelCascade.length - 1) {
+      if (i === fullCascade.length - 1) {
         throw new Error(`Todos los modelos fallaron. Último: ${err.message}`)
       }
     }
