@@ -28,7 +28,37 @@ const server = createServer(async (req, res) => {
 
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ status: 'ok', sessions: Object.keys(qrStore).length === 0 ? 'connected' : 'pending' }))
+    res.end(JSON.stringify({
+      status: 'ok',
+      sessions: Object.keys(qrStore).length === 0 ? 'connected' : 'pending',
+      providers: {
+        vertex: !!(process.env.GCP_VERTEX_PROJECT && process.env.GCP_VERTEX_SA_JSON),
+        google: !!process.env.GEMINI_API_KEY,
+        openai: !!process.env.OPENAI_API_KEY,
+      },
+      model: process.env.SUPERYO_GEMINI_MODEL || 'gemini-2.5-flash',
+      build_id: '2026-04-27-vertex-primary-debug',
+    }))
+    return
+  }
+  if (req.url === '/debug-agent') {
+    try {
+      const { generateSuperYoResponse } = await import('./super-yo/agent.js')
+      const r = await generateSuperYoResponse({
+        mensaje: 'Decí solo OK. Sin llamar herramientas.',
+        tipo: 'text',
+        wa_id: '5492615181225',
+      })
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, reply: r.respuesta?.slice(0, 300), tools_used: r.tools_used }))
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        ok: false,
+        error: (err as Error).message?.slice(0, 800),
+        stack: (err as Error).stack?.slice(0, 1500),
+      }))
+    }
     return
   }
   if (req.url === '/qr') {
