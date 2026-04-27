@@ -29,10 +29,26 @@ export interface YoTask {
   closed_at: string | null
 }
 
+export type Priority = 'low' | 'medium' | 'high' | 'urgent'
+export type TaskType = 'task' | 'info' | 'decision' | 'blocker' | 'memory'
+
 export interface ClassifyResult {
   project_slug: string | null
   confidence: number
+  priority?: Priority
+  task_type?: TaskType
+  group_slug?: string | null
+  due_at?: string | null          // ISO 8601
+  estimated_minutes?: number | null
+  tags?: string[]
   raw?: unknown
+}
+
+export interface ClassifyInput {
+  text?: string
+  audioBase64?: string
+  audioMimeType?: string          // e.g. 'audio/ogg', 'audio/mpeg'
+  candidates: string[]
 }
 
 export interface InsertTaskInput {
@@ -50,5 +66,5 @@ export interface PipelineDeps {
   ensureContact: (waId: string, defaults?: Partial<YoContact>) => Promise<YoContact>
   listProjectsForContact: (contactId: string) => Promise<string[]>
   insertTask: (input: InsertTaskInput) => Promise<YoTask>
-  classify: (text: string, candidates: string[]) => Promise<ClassifyResult>
+  classify: (input: ClassifyInput) => Promise<ClassifyResult>
 }
