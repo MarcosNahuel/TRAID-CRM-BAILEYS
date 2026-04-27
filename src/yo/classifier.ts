@@ -1,35 +1,21 @@
 /**
- * Sistema yo — Vertex AI classifier
+ * Sistema yo — Vertex AI classifier multimodal (texto + audio).
  *
- * Clasifica un mensaje libre contra una lista de project_slugs candidatos
- * y devuelve el más probable con un score de confianza.
- *
- * Auth: Service Account via GCP_VERTEX_SA_JSON_PATH (keyFile).
+ * Auth: Service Account via GCP_VERTEX_SA_JSON (inline) o GCP_VERTEX_SA_JSON_PATH (file).
  * Modelo: gemini-2.5-flash sobre Vertex AI (apiVersion v1).
- *
- * Plan: D:/Proyectos/CONOCIMIENTO-NAHUEL/plan/26-04/sistema-yo-session-1-plan.md (Task 4)
+ * Soporta audio inline ≤20MB (Vertex limit). Para mayor, usar GCS URI (futuro).
  */
 
-import type { ClassifyResult } from './types.js'
+import type { ClassifyInput, ClassifyResult, Priority, TaskType } from './types.js'
 
 const MODEL = 'gemini-2.5-flash'
 
-// Lazy-load del SDK: así el módulo se puede importar sin tener instalado
-// `@google/genai` (útil para unit tests que no tocan la API).
 let cachedClient: unknown = null
 
 async function getClient(): Promise<{
-  models: {
-    generateContent: (req: unknown) => Promise<{ text?: string }>
-  }
+  models: { generateContent: (req: unknown) => Promise<{ text?: string }> }
 }> {
-  if (cachedClient) {
-    return cachedClient as {
-      models: {
-        generateContent: (req: unknown) => Promise<{ text?: string }>
-      }
-    }
-  }
+  if (cachedClient) return cachedClient as never
 
   const project = process.env.GCP_VERTEX_PROJECT
   const location = process.env.GCP_VERTEX_LOCATION
@@ -37,13 +23,9 @@ async function getClient(): Promise<{
   const inlineSa = process.env.GCP_VERTEX_SA_JSON
 
   if (!project || !location) {
-    throw new Error(
-      '[yo/classifier] Faltan envs: GCP_VERTEX_PROJECT y GCP_VERTEX_LOCATION son obligatorios',
-    )
+    throw new Error('[yo/classifier] Faltan envs GCP_VERTEX_PROJECT y GCP_VERTEX_LOCATION')
   }
 
-  // Permite pasar SA inline (env var con JSON) — útil para Dokploy/containers
-  // sin volúmenes. Lo escribe a un archivo temporal y usa keyFile.
   if (!keyFile && inlineSa) {
     const { writeFileSync, existsSync, mkdirSync } = await import('fs')
     const { tmpdir } = await import('os')
@@ -55,9 +37,7 @@ async function getClient(): Promise<{
   }
 
   if (!keyFile) {
-    throw new Error(
-      '[yo/classifier] Falta GCP_VERTEX_SA_JSON_PATH o GCP_VERTEX_SA_JSON (service account)',
-    )
+    throw new Error('[yo/classifier] Falta GCP_VERTEX_SA_JSON o GCP_VERTEX_SA_JSON_PATH')
   }
 
   const { GoogleGenAI } = await import('@google/genai')
@@ -71,32 +51,40 @@ async function getClient(): Promise<{
       scopes: ['https://www.googleapis.com/auth/cloud-platform'],
     },
   })
-  return cachedClient as {
-    models: {
-      generateContent: (req: unknown) => Promise<{ text?: string }>
-    }
-  }
+  return cachedClient as never
 }
 
 function buildSystemPrompt(candidates: string[]): string {
   return [
-    'Sos un clasificador determinístico de mensajes de WhatsApp para un sistema de gestión de tareas personales.',
-    'Tu tarea: dado un mensaje libre, decidir a cuál de los siguientes project_slug pertenece.',
+    'Sos un clasificador de mensajes para un sistema de tareas personales.',
+    'Dado un mensaje (texto o transcripción de audio), clasificá contra los candidatos y devolvé schema JSON estricto.',
     '',
-    'Candidatos válidos:',
+    'Candidatos válidos para project_slug:',
     ...candidates.map((c) => `- ${c}`),
+    '- personal  (fallback explícito si nada encaja con confianza)',
+    '',
+    'Devolvé EXACTAMENTE este JSON:',
+    '{',
+    '  "project_slug": "<uno-de-candidatos-o-personal>",',
+    '  "confidence": <0..1>,',
+    '  "priority": "low|medium|high|urgent",',
+    '  "task_type": "task|info|decision|blocker|memory",',
+    '  "due_at": "<ISO 8601 o null>",',
+    '  "estimated_minutes": <int o null>,',
+    '  "tags": [<máx 4 strings cortos en kebab-case>]',
+    '}',
     '',
     'Reglas:',
-    '1. Devolvé EXACTAMENTE un JSON con esta forma: {"project_slug": "<uno-de-los-candidatos-o-null>", "confidence": <0..1>}',
-    '2. Si ningún candidato encaja con razonable certeza, devolvé project_slug:null y confidence baja.',
-    '3. confidence ∈ [0,1] — usá 0.9+ sólo si hay mención explícita o indicio fortísimo.',
-    '4. NO agregues comentarios, prosa, ni texto fuera del JSON.',
+    '- confidence 0.9+ solo si hay mención EXPLÍCITA del proyecto.',
+    '- Si nada encaja con confidence ≥0.5, devolvé project_slug=\'personal\' con confidence baja.',
+    '- priority \'urgent\' solo si hay deadline explícito <24h.',
+    '- task_type \'memory\' si el mensaje es información a recordar (no una acción).',
+    '- NO agregues prosa fuera del JSON.',
   ].join('\n')
 }
 
-function safeParse(text: string): { project_slug: unknown; confidence: unknown } | null {
+function safeParse(text: string): Record<string, unknown> | null {
   if (!text) return null
-  // Limpiar posibles fences ```json ... ```
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
@@ -105,48 +93,62 @@ function safeParse(text: string): { project_slug: unknown; confidence: unknown }
   try {
     return JSON.parse(cleaned)
   } catch {
-    // Fallback: extraer primer bloque {...}
-    const match = cleaned.match(/\{[\s\S]*\}/)
-    if (!match) return null
+    const m = cleaned.match(/\{[\s\S]*\}/)
+    if (!m) return null
     try {
-      return JSON.parse(match[0])
+      return JSON.parse(m[0])
     } catch {
       return null
     }
   }
 }
 
-function clamp01(n: number): number {
-  if (Number.isNaN(n) || !Number.isFinite(n)) return 0
-  if (n < 0) return 0
-  if (n > 1) return 1
-  return n
+function clamp01(n: unknown): number {
+  const x = typeof n === 'number' ? n : Number(n)
+  if (!Number.isFinite(x)) return 0
+  return Math.max(0, Math.min(1, x))
+}
+
+const VALID_PRIO: Priority[] = ['low', 'medium', 'high', 'urgent']
+const VALID_TYPE: TaskType[] = ['task', 'info', 'decision', 'blocker', 'memory']
+
+function normalizePriority(v: unknown): Priority {
+  return typeof v === 'string' && (VALID_PRIO as string[]).includes(v) ? (v as Priority) : 'medium'
+}
+function normalizeTaskType(v: unknown): TaskType {
+  return typeof v === 'string' && (VALID_TYPE as string[]).includes(v) ? (v as TaskType) : 'task'
 }
 
 /**
- * Clasifica un texto contra una lista de candidatos.
- * - Si candidates está vacío, retorna defaults sin invocar la API.
- * - Si el slug devuelto no está en candidates, se anula (project_slug:null).
- * - confidence siempre clamp [0,1].
+ * Classifier multimodal — texto y/o audio inline.
+ * Si ningún candidate matchea con confidence ≥0.5, retorna project_slug='personal'.
  */
-export async function classifyMessage(
-  text: string,
-  candidates: string[],
-): Promise<ClassifyResult> {
+export async function classifyMultimodal(input: ClassifyInput): Promise<ClassifyResult> {
+  const { text, audioBase64, audioMimeType, candidates } = input
+
+  if (!text && !audioBase64) {
+    throw new Error('classifyMultimodal: provide text or audio')
+  }
   if (!candidates || candidates.length === 0) {
     return { project_slug: null, confidence: 0 }
   }
 
   const ai = await getClient()
+  const parts: unknown[] = []
+  if (text) parts.push({ text: `Mensaje:\n${text}` })
+  if (audioBase64) {
+    parts.push({
+      inlineData: {
+        mimeType: audioMimeType || 'audio/ogg',
+        data: audioBase64,
+      },
+    })
+    if (!text) parts.push({ text: 'Transcribí el audio mentalmente y clasificá.' })
+  }
 
   const response = await ai.models.generateContent({
     model: MODEL,
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: `Mensaje:\n${text}` }],
-      },
-    ],
+    contents: [{ role: 'user', parts }],
     config: {
       systemInstruction: buildSystemPrompt(candidates),
       temperature: 0,
@@ -156,20 +158,33 @@ export async function classifyMessage(
 
   const rawText = response.text ?? ''
   const parsed = safeParse(rawText)
-
-  if (!parsed) {
-    return { project_slug: null, confidence: 0, raw: rawText }
-  }
+  if (!parsed) return { project_slug: 'personal', confidence: 0, raw: rawText }
 
   const slugRaw = parsed.project_slug
+  const allowed = [...candidates, 'personal']
   const slug =
-    typeof slugRaw === 'string' && candidates.includes(slugRaw) ? slugRaw : null
+    typeof slugRaw === 'string' && allowed.includes(slugRaw) ? slugRaw : 'personal'
 
-  const confRaw =
-    typeof parsed.confidence === 'number'
-      ? parsed.confidence
-      : Number(parsed.confidence)
-  const confidence = slug ? clamp01(confRaw) : 0
+  const confidence = clamp01(parsed.confidence)
+  const tagsRaw = Array.isArray(parsed.tags) ? parsed.tags : []
+  const tags = tagsRaw.filter((t: unknown) => typeof t === 'string').slice(0, 4) as string[]
 
-  return { project_slug: slug, confidence, raw: parsed }
+  return {
+    project_slug: slug,
+    confidence,
+    priority: normalizePriority(parsed.priority),
+    task_type: normalizeTaskType(parsed.task_type),
+    due_at: typeof parsed.due_at === 'string' ? parsed.due_at : null,
+    estimated_minutes:
+      typeof parsed.estimated_minutes === 'number' ? parsed.estimated_minutes : null,
+    tags,
+    raw: parsed,
+  }
+}
+
+/**
+ * Compat: API antigua text-only. Delega a classifyMultimodal.
+ */
+export async function classifyMessage(text: string, candidates: string[]): Promise<ClassifyResult> {
+  return classifyMultimodal({ text, candidates })
 }
