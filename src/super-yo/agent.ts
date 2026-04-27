@@ -1,16 +1,31 @@
 /**
  * SUPER YO — Agente personal de Nahuel Albornoz
  *
- * Model cascade: Gemini -> OpenAI fallback
+ * Model cascade: Vertex AI Gemini (SA) -> AI Studio Gemini (API key) -> OpenAI fallback
  * Tools: 16 herramientas (CRM, ghost writer, calendar, gmail)
+ *
+ * 2026-04-27: migrado a Vertex AI primary porque AI Studio free tier (20 req/día)
+ * se agotaba y devolvía "Error procesando" a todo. Vertex usa $1300 crédito GCP.
  */
 
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createVertex } from '@ai-sdk/google-vertex'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText, stepCountIs } from 'ai'
 import { checkGuardrails } from './middleware.js'
 import { superYoTools, setCurrentUserMessage } from './tools.js'
 import { getSuperYoChatHistory, saveSuperYoMessage, loadAgentContext } from './crm-client.js'
+
+const vertex =
+  process.env.GCP_VERTEX_PROJECT && process.env.GCP_VERTEX_SA_JSON
+    ? createVertex({
+        project: process.env.GCP_VERTEX_PROJECT,
+        location: process.env.GCP_VERTEX_LOCATION || 'us-central1',
+        googleAuthOptions: {
+          credentials: JSON.parse(process.env.GCP_VERTEX_SA_JSON),
+        },
+      })
+    : null
 
 const google = process.env.GEMINI_API_KEY
   ? createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY })
@@ -164,8 +179,8 @@ export async function generateSuperYoResponse({
 
   const startTime = Date.now()
 
-  if (!google && !openai) {
-    throw new Error('No AI provider configured (GEMINI_API_KEY or OPENAI_API_KEY)')
+  if (!vertex && !google && !openai) {
+    throw new Error('No AI provider configured (Vertex SA, GEMINI_API_KEY o OPENAI_API_KEY)')
   }
 
   setCurrentUserMessage(mensaje)
@@ -174,8 +189,17 @@ export async function generateSuperYoResponse({
   const systemPrompt = SUPER_YO_SYSTEM_PROMPT + dynamicContext + memoryContext
 
   type ModelEntry = { id: string; provider: string; model: any }
-  const PRIMARY_MODEL = process.env.SUPERYO_GEMINI_MODEL || 'gemini-3.1-flash-lite-preview'
+  const PRIMARY_MODEL = process.env.SUPERYO_GEMINI_MODEL || 'gemini-2.5-flash'
   const modelCascade: ModelEntry[] = [
+    ...(vertex
+      ? [
+          {
+            id: PRIMARY_MODEL,
+            provider: 'vertex',
+            model: vertex(PRIMARY_MODEL),
+          },
+        ]
+      : []),
     ...(google
       ? [
           {

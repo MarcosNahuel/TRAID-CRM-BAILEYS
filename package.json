@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.53",
+    "@ai-sdk/google-vertex": "^4.0.112",
     "@ai-sdk/openai": "^3.0.48",
     "@anthropic-ai/claude-agent-sdk": "^0.2.89",
     "@google/genai": "^1.46.0",
