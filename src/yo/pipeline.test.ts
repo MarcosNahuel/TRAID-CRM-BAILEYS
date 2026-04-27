@@ -9,6 +9,7 @@ function makeDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
     name: null,
     kind: 'unknown',
     requires_llm_classification: false,
+    is_personal: false,
     notes: null,
     created_at: '',
     updated_at: '',
@@ -44,10 +45,11 @@ describe('yo/pipeline.processIncomingForYo', () => {
     const deps = makeDeps({
       listProjectsForContact: vi.fn().mockResolvedValue(['diego-erp']),
     })
-    const t = await processIncomingForYo(
+    const result = await processIncomingForYo(
       { waId: '5491111', content: 'hola', source: 'whatsapp' },
       deps
     )
+    const t = result as YoTask
     expect(t.project_slug).toBe('diego-erp')
     expect(deps.classify).not.toHaveBeenCalled()
   })
@@ -56,10 +58,11 @@ describe('yo/pipeline.processIncomingForYo', () => {
     const deps = makeDeps({
       listProjectsForContact: vi.fn().mockResolvedValue(['a', 'b']),
     })
-    const t = await processIncomingForYo(
+    const result = await processIncomingForYo(
       { waId: '5491111', content: 'hola', source: 'whatsapp' },
       deps
     )
+    const t = result as YoTask
     expect(t.project_slug).toBeNull()
     expect(t.metadata.untriaged_reason).toBe('multiple_projects_no_llm')
     expect(t.metadata.candidate_projects).toEqual(['a', 'b'])
@@ -67,25 +70,37 @@ describe('yo/pipeline.processIncomingForYo', () => {
 
   it('contacto desconocido sin proyectos → untriaged', async () => {
     const deps = makeDeps()
-    const t = await processIncomingForYo(
+    const result = await processIncomingForYo(
       { waId: '5491111', content: 'hola', source: 'whatsapp' },
       deps
     )
+    const t = result as YoTask
     expect(t.project_slug).toBeNull()
     expect(t.metadata.untriaged_reason).toBe('unknown_contact')
+  })
+
+  it('skip cuando is_personal=true', async () => {
+    const deps = makeDeps({
+      ensureContact: vi.fn().mockResolvedValue({
+        id: 'c-1', whatsapp_number: '5491111', name: null,
+        kind: 'unknown', requires_llm_classification: false,
+        is_personal: true, notes: null, created_at: '', updated_at: '',
+      } as YoContact),
+    })
+    const result = await processIncomingForYo(
+      { waId: '5491111', content: 'hola', source: 'whatsapp' },
+      deps
+    )
+    expect(result).toEqual({ skipped: true, reason: 'contact_is_personal' })
+    expect(deps.classify).not.toHaveBeenCalled()
   })
 
   it('flag LLM activo + confidence alta → asigna sugerido', async () => {
     const deps = makeDeps({
       ensureContact: vi.fn().mockResolvedValue({
-        id: 'c-1',
-        whatsapp_number: '5491111',
-        name: 'Nahuel',
-        kind: 'internal',
-        requires_llm_classification: true,
-        notes: null,
-        created_at: '',
-        updated_at: '',
+        id: 'c-1', whatsapp_number: '5491111', name: 'Nahuel',
+        kind: 'internal', requires_llm_classification: true,
+        is_personal: false, notes: null, created_at: '', updated_at: '',
       } as YoContact),
       listProjectsForContact: vi.fn().mockResolvedValue([]),
       classify: vi.fn().mockResolvedValue({
@@ -93,38 +108,35 @@ describe('yo/pipeline.processIncomingForYo', () => {
         confidence: 0.92,
       }),
     })
-    const t = await processIncomingForYo(
+    const result = await processIncomingForYo(
       { waId: '5491111', content: 'agregar tool nueva en super-yo', source: 'whatsapp' },
       deps,
       { activeProjects: ['super-yo', 'diego-erp'] }
     )
+    const t = result as YoTask
     expect(t.project_slug).toBe('super-yo')
-    expect((t.metadata.classification_attempt as { confidence: number }).confidence).toBe(0.92)
+    expect((t.metadata.classification as { confidence: number }).confidence).toBe(0.92)
   })
 
-  it('flag LLM activo + confidence baja → untriaged con audit', async () => {
+  it('flag LLM activo + confidence baja → asigna a personal', async () => {
     const deps = makeDeps({
       ensureContact: vi.fn().mockResolvedValue({
-        id: 'c-1',
-        whatsapp_number: '5491111',
-        name: 'Nahuel',
-        kind: 'internal',
-        requires_llm_classification: true,
-        notes: null,
-        created_at: '',
-        updated_at: '',
+        id: 'c-1', whatsapp_number: '5491111', name: 'Nahuel',
+        kind: 'internal', requires_llm_classification: true,
+        is_personal: false, notes: null, created_at: '', updated_at: '',
       } as YoContact),
       classify: vi.fn().mockResolvedValue({
         project_slug: 'a',
         confidence: 0.3,
       }),
     })
-    const t = await processIncomingForYo(
+    const result = await processIncomingForYo(
       { waId: '5491111', content: 'qué onda', source: 'whatsapp' },
       deps,
       { activeProjects: ['a', 'b'] }
     )
-    expect(t.project_slug).toBeNull()
-    expect(t.metadata.untriaged_reason).toBe('llm_low_confidence')
+    const t = result as YoTask
+    expect(t.project_slug).toBe('personal')
+    expect((t.metadata.classification as { fallback: string }).fallback).toBe('personal')
   })
 })

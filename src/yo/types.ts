@@ -9,6 +9,7 @@ export interface YoContact {
   name: string | null
   kind: 'client' | 'internal' | 'unknown'
   requires_llm_classification: boolean
+  is_personal: boolean
   notes: string | null
   created_at: string
   updated_at: string
@@ -56,6 +57,11 @@ export interface InsertTaskInput {
   content_md: string
   source: YoTask['source']
   priority?: YoTask['priority']
+  task_type?: TaskType
+  due_at?: string | null
+  estimated_minutes?: number | null
+  tags?: string[]
+  classification_confidence?: number | null
   assigned_to?: string | null
   created_by_contact_id?: string | null
   metadata?: Record<string, unknown>
@@ -67,4 +73,5 @@ export interface PipelineDeps {
   listProjectsForContact: (contactId: string) => Promise<string[]>
   insertTask: (input: InsertTaskInput) => Promise<YoTask>
   classify: (input: ClassifyInput) => Promise<ClassifyResult>
+  checkGroupMuted?: (groupId: string) => Promise<boolean>
 }

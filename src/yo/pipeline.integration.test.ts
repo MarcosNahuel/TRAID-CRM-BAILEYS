@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { processIncomingForYo } from './pipeline.js'
+import type { ProcessResult } from './pipeline.js'
 import {
   ensureContact,
   listProjectsForContact,
@@ -21,17 +22,17 @@ const TEST_WA_INTERNAL = '5499900000001' // contacto interno con flag LLM
 const TEST_WA_CLIENT_1PROJ = '5499900000002' // cliente 1 proyecto
 const TEST_WA_CLIENT_NPROJ = '5499900000003' // cliente N proyectos
 const TEST_WA_UNKNOWN = '5499900000004' // sin contacto pre-existente
+const TEST_WA_PERSONAL = '5499900000005' // contacto personal (is_personal=true)
 
 describe.runIf(RUN_INTEGRATION)('yo/pipeline (E2E con Supabase real)', () => {
   beforeAll(async () => {
     const sb = getYoSupabase()
     // Sembrar contactos de prueba
-    const internal = await ensureContact(TEST_WA_INTERNAL, {
+    await ensureContact(TEST_WA_INTERNAL, {
       kind: 'internal',
       name: 'Test Nahuel',
       requires_llm_classification: true,
     })
-    // forzar flag actualizado
     await sb
       .from('contacts')
       .update({ requires_llm_classification: true, kind: 'internal' })
@@ -46,6 +47,13 @@ describe.runIf(RUN_INTEGRATION)('yo/pipeline (E2E con Supabase real)', () => {
       name: 'Test Client NProj',
     })
 
+    // Contacto personal para test mute
+    await ensureContact(TEST_WA_PERSONAL, { kind: 'unknown', name: 'Test Personal' })
+    await sb
+      .from('contacts')
+      .update({ is_personal: true })
+      .eq('whatsapp_number', TEST_WA_PERSONAL)
+
     await sb.from('contact_projects').upsert([
       { contact_id: client1.id, project_slug: 'test-1proj' },
       { contact_id: clientN.id, project_slug: 'test-a' },
@@ -55,8 +63,7 @@ describe.runIf(RUN_INTEGRATION)('yo/pipeline (E2E con Supabase real)', () => {
 
   afterAll(async () => {
     const sb = getYoSupabase()
-    // Cleanup: tasks por contacto + contactos
-    for (const wa of [TEST_WA_INTERNAL, TEST_WA_CLIENT_1PROJ, TEST_WA_CLIENT_NPROJ, TEST_WA_UNKNOWN]) {
+    for (const wa of [TEST_WA_INTERNAL, TEST_WA_CLIENT_1PROJ, TEST_WA_CLIENT_NPROJ, TEST_WA_UNKNOWN, TEST_WA_PERSONAL]) {
       const c = await lookupContactByWaId(wa)
       if (c) {
         await sb.from('tasks').delete().eq('created_by_contact_id', c.id)
@@ -74,20 +81,24 @@ describe.runIf(RUN_INTEGRATION)('yo/pipeline (E2E con Supabase real)', () => {
   }
 
   it('cliente 1 proyecto sin LLM → asigna directo a ese proyecto', async () => {
-    const t = await processIncomingForYo(
+    const result = await processIncomingForYo(
       { waId: TEST_WA_CLIENT_1PROJ, content: 'hola, consulta del proyecto', source: 'whatsapp' },
       deps
     )
+    expect('skipped' in result).toBe(false)
+    const t = result as import('./types.js').YoTask
     expect(t.project_slug).toBe('test-1proj')
     expect(t.source).toBe('whatsapp')
     expect(t.status).toBe('pending')
   })
 
   it('cliente N proyectos sin LLM → untriaged con candidates', async () => {
-    const t = await processIncomingForYo(
+    const result = await processIncomingForYo(
       { waId: TEST_WA_CLIENT_NPROJ, content: 'hola', source: 'whatsapp' },
       deps
     )
+    expect('skipped' in result).toBe(false)
+    const t = result as import('./types.js').YoTask
     expect(t.project_slug).toBeNull()
     expect(t.metadata.untriaged_reason).toBe('multiple_projects_no_llm')
     expect(t.metadata.candidate_projects).toEqual(
@@ -96,10 +107,12 @@ describe.runIf(RUN_INTEGRATION)('yo/pipeline (E2E con Supabase real)', () => {
   })
 
   it('contacto desconocido → untriaged unknown_contact + crea contacto', async () => {
-    const t = await processIncomingForYo(
+    const result = await processIncomingForYo(
       { waId: TEST_WA_UNKNOWN, content: 'mensaje desde wa nuevo', source: 'whatsapp' },
       deps
     )
+    expect('skipped' in result).toBe(false)
+    const t = result as import('./types.js').YoTask
     expect(t.project_slug).toBeNull()
     expect(t.metadata.untriaged_reason).toBe('unknown_contact')
     const c = await lookupContactByWaId(TEST_WA_UNKNOWN)
@@ -111,8 +124,11 @@ describe.runIf(RUN_INTEGRATION)('yo/pipeline (E2E con Supabase real)', () => {
     deps.classify = vi.fn().mockResolvedValue({
       project_slug: 'super-yo',
       confidence: 0.95,
+      priority: 'medium',
+      task_type: 'task',
+      tags: [],
     })
-    const t = await processIncomingForYo(
+    const result = await processIncomingForYo(
       {
         waId: TEST_WA_INTERNAL,
         content: 'agregar tool nueva en super-yo agent',
@@ -121,8 +137,48 @@ describe.runIf(RUN_INTEGRATION)('yo/pipeline (E2E con Supabase real)', () => {
       deps,
       { activeProjects: ['super-yo', 'diego-erp', 'conocimiento-nahuel'] }
     )
+    expect('skipped' in result).toBe(false)
+    const t = result as import('./types.js').YoTask
     expect(t.project_slug).toBe('super-yo')
     expect(deps.classify).toHaveBeenCalledTimes(1)
+  })
+
+  it('skip cuando contact is_personal=true', async () => {
+    deps.classify = vi.fn()
+    const result = await processIncomingForYo(
+      { waId: TEST_WA_PERSONAL, content: 'mensaje personal', source: 'whatsapp' },
+      deps,
+    )
+    expect(result).toEqual({ skipped: true, reason: 'contact_is_personal' })
+    expect(deps.classify).not.toHaveBeenCalled()
+  })
+
+  it('classifier mock audio → task con source whatsapp + audit row', async () => {
+    deps.classify = vi.fn().mockResolvedValue({
+      project_slug: 'personal',
+      confidence: 0.3,
+      priority: 'low',
+      task_type: 'info',
+      tags: [],
+    })
+    const sb = getYoSupabase()
+    const countBefore = await sb.from('classification_audit').select('id', { count: 'exact', head: true })
+    const result = await processIncomingForYo(
+      {
+        waId: TEST_WA_INTERNAL,
+        content: '',
+        source: 'whatsapp',
+        audioBase64: 'dGVzdA==', // base64 de 'test'
+        audioMimeType: 'audio/ogg',
+      },
+      deps,
+      { activeProjects: ['super-yo'] },
+    )
+    expect('skipped' in result).toBe(false)
+    const t = result as import('./types.js').YoTask
+    expect(t.project_slug).toBe('personal')
+    const countAfter = await sb.from('classification_audit').select('id', { count: 'exact', head: true })
+    expect((countAfter.count ?? 0)).toBeGreaterThan(countBefore.count ?? 0)
   })
 
   it('listTasks ve las tasks creadas, closeTask las cierra', async () => {

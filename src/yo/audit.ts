@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnySupabaseClient = import('@supabase/supabase-js').SupabaseClient<any, any, any>
 
 export interface ClassificationAuditRow {
   task_id?: string | null
@@ -15,7 +16,7 @@ export interface ClassificationAuditRow {
 }
 
 export async function recordClassification(
-  client: SupabaseClient,
+  client: AnySupabaseClient,
   row: ClassificationAuditRow,
 ): Promise<void> {
   try {

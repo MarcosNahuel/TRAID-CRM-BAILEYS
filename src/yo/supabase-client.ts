@@ -92,6 +92,11 @@ export async function insertTask(input: InsertTaskInput): Promise<YoTask> {
       content_md: input.content_md,
       source: input.source,
       priority: input.priority ?? 'medium',
+      task_type: input.task_type ?? null,
+      due_at: input.due_at ?? null,
+      estimated_minutes: input.estimated_minutes ?? null,
+      tags: input.tags ?? [],
+      classification_confidence: input.classification_confidence ?? null,
       assigned_to: input.assigned_to ?? null,
       created_by_contact_id: input.created_by_contact_id ?? null,
       metadata: input.metadata ?? {},
@@ -100,6 +105,15 @@ export async function insertTask(input: InsertTaskInput): Promise<YoTask> {
     .single()
   if (error) throw new Error(`insertTask failed: ${error.message}`)
   return data as YoTask
+}
+
+export async function checkGroupMuted(groupId: string): Promise<boolean> {
+  const { data } = await getYoSupabase()
+    .from('groups')
+    .select('muted')
+    .eq('id', groupId)
+    .maybeSingle()
+  return (data as { muted?: boolean } | null)?.muted === true
 }
 
 export async function listTasks(opts: {
