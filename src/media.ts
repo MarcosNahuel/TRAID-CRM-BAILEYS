@@ -10,7 +10,16 @@ function ensureAdc(): boolean {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
     return true
   }
+  // Prioridad: SA_JSON_B64 (recomendado, evita issues de escaping en env vars) > SA_JSON inline > SA_JSON_PATH archivo
+  const b64 = process.env.GCP_VERTEX_SA_JSON_B64
   const inlineJson = process.env.GCP_VERTEX_SA_JSON
+  if (b64) {
+    const decoded = Buffer.from(b64, 'base64').toString('utf-8')
+    const tmpPath = path.join(os.tmpdir(), 'gcp-sa-media.json')
+    fs.writeFileSync(tmpPath, decoded, { mode: 0o600 })
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath
+    return true
+  }
   if (inlineJson) {
     const tmpPath = path.join(os.tmpdir(), 'gcp-sa-media.json')
     fs.writeFileSync(tmpPath, inlineJson, { mode: 0o600 })
@@ -30,7 +39,7 @@ const ai: GoogleGenAI | null = (() => {
     return null
   }
   if (!ensureAdc()) {
-    console.warn('[media] ADC no resuelto (falta GCP_VERTEX_SA_JSON o GCP_VERTEX_SA_JSON_PATH) — Gemini deshabilitado')
+    console.warn('[media] ADC no resuelto (setear GCP_VERTEX_SA_JSON_B64 o GCP_VERTEX_SA_JSON o GCP_VERTEX_SA_JSON_PATH) — Gemini deshabilitado')
     return null
   }
   return new GoogleGenAI({
