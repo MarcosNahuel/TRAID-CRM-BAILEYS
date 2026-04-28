@@ -64,6 +64,8 @@ export async function logMessage(data: {
   content?: string
   media_url?: string
   has_source_code?: boolean
+  wa_message_id?: string
+  transcription_failed?: boolean
 }) {
   // Buscar lead_id por phone
   const { data: lead } = await getSupabase()
@@ -82,6 +84,8 @@ export async function logMessage(data: {
       content: data.content || null,
       media_url: data.media_url || null,
       has_source_code: data.has_source_code || false,
+      wa_message_id: data.wa_message_id || null,
+      transcription_failed: data.transcription_failed || false,
     })
 
   if (error) throw new Error(`logMessage failed: ${error.message}`)

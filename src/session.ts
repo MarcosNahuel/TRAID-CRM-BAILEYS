@@ -133,13 +133,15 @@ async function handleMessage(msg: WAMessage, sessionName: string, isHistorySync:
   else if (messageContent.audioMessage) {
     messageType = 'audio'
     if (isHistorySync) {
-      textContent = '[Audio]'
+      textContent = '[🎤 Audio]'
     } else {
       try {
         const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer
-        textContent = await transcribeAudio(buffer)
+        const audioMime = messageContent.audioMessage?.mimetype || 'audio/ogg; codecs=opus'
+        const transcription = await transcribeAudio(buffer, audioMime)
+        textContent = `[🎤 Audio] ${transcription}`
       } catch {
-        textContent = '[Audio - no se pudo descargar]'
+        textContent = '[🎤 Audio - no se pudo descargar]'
       }
     }
   }
@@ -213,6 +215,9 @@ async function handleMessage(msg: WAMessage, sessionName: string, isHistorySync:
 
   // Log message (chats + grupos)
   try {
+    const transcriptionFailed = ['audio', 'image', 'document'].includes(messageType) &&
+      (textContent.includes('no se pudo') || textContent.includes('error al'))
+
     await logMessage({
       contact_phone: isGroup ? jid : phone, // para grupos, guardar el JID del grupo
       direction,
@@ -220,6 +225,8 @@ async function handleMessage(msg: WAMessage, sessionName: string, isHistorySync:
       content: isGroup ? `[${senderName}] ${textContent}` : textContent,
       media_url: mediaUrl,
       has_source_code: hasSourceCode,
+      wa_message_id: msg.key.id ?? undefined,
+      transcription_failed: transcriptionFailed,
     })
 
     // Generar embedding async (fire-and-forget) — no para sync masivo
