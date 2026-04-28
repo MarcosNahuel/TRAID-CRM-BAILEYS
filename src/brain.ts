@@ -309,7 +309,7 @@ export async function analyzeConversation(
     // Paso 2b: Si es confirmación, cerrar el ticket más reciente en resolved en yo.tasks
     if (classification.type === 'confirmation' && classification.project_tag) {
       try {
-        const { data: resolvedTask } = await supabase
+        const { data: resolvedTask } = await supabase()
           .schema('yo')
           .from('tasks')
           .select('id, content_md')
@@ -320,7 +320,7 @@ export async function analyzeConversation(
           .maybeSingle()
 
         if (resolvedTask) {
-          await supabase
+          await supabase()
             .schema('yo')
             .from('tasks')
             .update({
