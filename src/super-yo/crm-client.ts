@@ -120,7 +120,9 @@ export async function saveSuperYoMessage(
       scope: options?.scope || null,
     })
 
-  if (error) console.error('[crm-client] Error guardando chat:', error.message)
+  if (error && !error.message?.includes('does not exist')) {
+    console.error('[crm-client] Error guardando chat:', error.message)
+  }
 }
 
 /**
@@ -137,7 +139,9 @@ export async function getSuperYoChatHistory(
     .limit(limit)
 
   if (error) {
-    console.error('[crm-client] Error cargando historial:', error.message)
+    if (!error.message?.includes('does not exist')) {
+      console.error('[crm-client] Error cargando historial:', error.message)
+    }
     return []
   }
 

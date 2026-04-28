@@ -40,10 +40,9 @@ export const consultarCrmTool = tool({
     'Busca mensajes en el CRM de WhatsApp usando búsqueda semántica + texto. Útil para encontrar qué dijo alguien, cuándo, sobre qué tema.',
   parameters: z.object({
     query: z.string().describe('Texto de búsqueda (semántico + keyword)'),
-    phone: z.string().optional().describe('Filtrar por teléfono del contacto'),
+    phone: z.string().default('').describe('Filtrar por teléfono del contacto'),
     limit: z
       .number()
-      .optional()
       .default(10)
       .describe('Cantidad de resultados'),
   }),
@@ -127,7 +126,7 @@ export const buscarContactoTool = tool({
     'Busca un contacto en el knowledge graph. Devuelve datos del contacto, resumen, scope, y sus relaciones.',
   parameters: z.object({
     name: z.string().describe('Nombre del contacto a buscar'),
-    scope: z.string().optional().describe('Filtrar por scope: traid, family, personal, dge, etc.'),
+    scope: z.string().default('').describe('Filtrar por scope: traid, family, personal, dge, etc.'),
   }),
   execute: async ({ name, scope }) => {
     try {
@@ -170,13 +169,13 @@ export const sugerirRespuestaTool = tool({
   description:
     'Genera un draft de respuesta para que Nahuel copie/adapte. Usa la voz correcta del contacto (ejecutor/visionario/natural).',
   parameters: z.object({
-    contact_phone: z.string().optional().describe('Teléfono del contacto para contexto'),
-    contact_name: z.string().optional().describe('Nombre del contacto'),
+    contact_phone: z.string().default('').describe('Teléfono del contacto para contexto'),
+    contact_name: z.string().default('').describe('Nombre del contacto'),
     context: z.string().describe('Descripción de la situación y qué necesita responder'),
     voice: z
       .enum(['ejecutor', 'visionario', 'natural'])
-      .optional()
-      .describe('Override de voz'),
+      .default('natural')
+      .describe('Override de voz (default: natural)'),
   }),
   execute: async ({ contact_phone, contact_name, context, voice }) => {
     let contactContext = ''
@@ -253,10 +252,10 @@ export const graphQueryTool = tool({
   description:
     'Explora el knowledge graph. Busca entidades por tipo, scope, o nombre.',
   parameters: z.object({
-    entity_name: z.string().optional().describe('Nombre de entidad a buscar'),
-    type: z.string().optional().describe('Tipo: person, organization, topic, event, task, project, goal, principle'),
-    scope: z.string().optional().describe('Scope: traid, family, personal, dge, health, etc.'),
-    depth: z.number().optional().default(1).describe('Profundidad de vecinos'),
+    entity_name: z.string().default('').describe('Nombre de entidad a buscar'),
+    type: z.string().default('').describe('Tipo: person, organization, topic, event, task, project, goal, principle'),
+    scope: z.string().default('').describe('Scope: traid, family, personal, dge, health, etc.'),
+    depth: z.number().default(1).describe('Profundidad de vecinos'),
   }),
   execute: async ({ entity_name, type, scope }) => {
     try {
@@ -317,7 +316,7 @@ export const planificarDiaTool = tool({
   description:
     'Obtiene tareas, eventos y compromisos pendientes para planificar el día.',
   parameters: z.object({
-    date: z.string().optional().describe('Fecha en formato YYYY-MM-DD (default: hoy)'),
+    date: z.string().default('').describe('Fecha en formato YYYY-MM-DD (default: hoy)'),
   }),
   execute: async ({ date }) => {
     try {
@@ -367,7 +366,7 @@ export const analizarSentimientoTool = tool({
     'Analiza la tendencia emocional de la relación con un contacto.',
   parameters: z.object({
     contact_phone: z.string().describe('Teléfono del contacto a analizar'),
-    last_n: z.number().optional().default(20).describe('Cantidad de mensajes a analizar'),
+    last_n: z.number().default(20).describe('Cantidad de mensajes a analizar'),
   }),
   execute: async ({ contact_phone, last_n }) => {
     try {
@@ -515,8 +514,8 @@ export const crearEventoCalendarioTool = tool({
     scope: z.enum(['traid', 'family', 'personal', 'dge', 'health']).describe('Scope del evento'),
     title: z.string().describe('Título del evento'),
     datetime: z.string().describe('Fecha y hora ISO 8601'),
-    duration_minutes: z.number().optional().default(60).describe('Duración en minutos'),
-    description: z.string().optional().describe('Descripción'),
+    duration_minutes: z.number().default(60).describe('Duración en minutos'),
+    description: z.string().default('').describe('Descripción'),
   }),
   execute: async ({ scope, title, datetime, duration_minutes, description }) => {
     try {
@@ -541,8 +540,8 @@ export const verAgendaTool = tool({
   description:
     'Lista los eventos del día de todos los calendarios o de un scope.',
   parameters: z.object({
-    date: z.string().optional().describe('Fecha en formato YYYY-MM-DD (default: hoy)'),
-    scope: z.string().optional().describe('Filtrar por scope'),
+    date: z.string().default('').describe('Fecha en formato YYYY-MM-DD (default: hoy)'),
+    scope: z.string().default('').describe('Filtrar por scope'),
   }),
   execute: async ({ date, scope }) => {
     try {
@@ -569,7 +568,7 @@ export const configurarVozContactoTool = tool({
   parameters: z.object({
     contact_phone: z.string().describe('Teléfono del contacto'),
     voice: z.enum(['ejecutor', 'visionario', 'natural']).describe('Voz default'),
-    override_rule: z.string().optional().describe('Regla de override'),
+    override_rule: z.string().default('').describe('Regla de override'),
   }),
   execute: async ({ contact_phone, voice, override_rule }) => {
     try {
@@ -611,7 +610,7 @@ export const configurarObjetivoContactoTool = tool({
   parameters: z.object({
     contact_phone: z.string().describe('Teléfono del contacto'),
     objective: z.string().describe('El objetivo activo'),
-    strategy: z.string().optional().describe('Estrategia sugerida'),
+    strategy: z.string().default('').describe('Estrategia sugerida'),
   }),
   execute: async ({ contact_phone, objective, strategy }) => {
     try {
@@ -691,7 +690,7 @@ export const buscarEmailsTool = tool({
     'Busca emails en Gmail. Usa sintaxis de búsqueda Gmail.',
   parameters: z.object({
     query: z.string().describe('Query de búsqueda Gmail'),
-    max_results: z.number().optional().default(5).describe('Cantidad máxima de resultados'),
+    max_results: z.number().default(5).describe('Cantidad máxima de resultados'),
   }),
   execute: async ({ query, max_results }) => {
     try {
@@ -744,7 +743,7 @@ export const crearBorradorEmailTool = tool({
     to: z.string().describe('Email del destinatario'),
     subject: z.string().describe('Asunto del email'),
     body: z.string().describe('Contenido del email'),
-    reply_to_id: z.string().optional().describe('ID del mensaje al que responde'),
+    reply_to_id: z.string().default('').describe('ID del mensaje al que responde'),
   }),
   execute: async ({ to, subject, body, reply_to_id }) => {
     try {
@@ -770,10 +769,10 @@ export const buscarMemoriaTool = tool({
     'Busca en la memoria compartida entre Super Yo y Claude Code. Encuentra decisiones, action items, info de proyectos.',
   parameters: z.object({
     query: z.string().describe('Texto de búsqueda (busca en content y key)'),
-    project_tag: z.string().optional().describe('Filtrar por proyecto: diego-erp, alex-saas, super-yo, etc.'),
-    layer: z.number().optional().describe('Filtrar por capa: 0=estratégica, 1=proyecto'),
-    memory_type: z.string().optional().describe('Filtrar por tipo: decision, action_item, info, blocker, payment'),
-    limit: z.number().optional().default(10).describe('Cantidad de resultados'),
+    project_tag: z.string().default('').describe('Filtrar por proyecto: diego-erp, alex-saas, super-yo, etc.'),
+    layer: z.number().default(0).describe('Filtrar por capa: 0=estratégica, 1=proyecto'),
+    memory_type: z.string().default('').describe('Filtrar por tipo: decision, action_item, info, blocker, payment'),
+    limit: z.number().default(10).describe('Cantidad de resultados'),
   }),
   execute: async ({ query, project_tag, layer, memory_type, limit }) => {
     try {
@@ -824,8 +823,8 @@ export const guardarMemoriaTool = tool({
     layer: z.number().describe('Capa: 0=estratégica (negocio), 1=proyecto (técnica)'),
     memory_type: z.enum(['decision', 'action_item', 'info', 'blocker', 'payment']).describe('Tipo de memoria'),
     key: z.string().describe('Key human-readable, ej: nacho/pivot-partnership'),
-    project_tag: z.string().optional().describe('Tag del proyecto (null=global)'),
-    direction: z.enum(['to_agent', 'to_claude', 'both']).optional().default('both').describe('Dirección de la memoria'),
+    project_tag: z.string().default('').describe('Tag del proyecto (null=global)'),
+    direction: z.enum(['to_agent', 'to_claude', 'both']).default('both').describe('Dirección de la memoria'),
   }),
   execute: async ({ content, layer, memory_type, key, project_tag, direction }) => {
     try {
@@ -969,8 +968,8 @@ NO la uses para: chitchat, preguntas matemáticas, definiciones de cultura gener
 Después de obtener resultados: en la respuesta final, citá entre paréntesis los source_path de los 2-3 chunks que más usaste. Mencioná similarity solo si es < 0.5 (señal de que el match puede no ser preciso).`,
   parameters: z.object({
     query: z.string().describe('Pregunta o búsqueda en lenguaje natural'),
-    k: z.number().optional().default(5).describe('Cantidad de chunks a devolver (1-20)'),
-    category: z.enum(['content','knowledge','standards','brands','propuestas','daparo','root']).optional().describe('Filtrar por categoría/área del repo'),
+    k: z.number().default(5).describe('Cantidad de chunks a devolver (1-20)'),
+    category: z.enum(['content','knowledge','standards','brands','propuestas','daparo','root','']).default('').describe('Filtrar por categoría/área del repo. Vacío = todas.'),
   }),
   execute: async ({ query, k, category }) => {
     try {
@@ -982,7 +981,7 @@ Después de obtener resultados: en la respuesta final, citá entre paréntesis l
       const { data, error } = await getYoSupabase().rpc('match_knowledge', {
         query_embedding: embedding,
         match_count: k ?? 5,
-        category_filter: category ?? null,
+        category_filter: category && category !== '' ? category : null,
       })
       if (error) throw new Error(error.message)
       return {
