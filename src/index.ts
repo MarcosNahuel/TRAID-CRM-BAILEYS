@@ -152,7 +152,7 @@ async function main() {
 
   // WHATSAPP_ENABLED=false permite arrancar el servicio sin Baileys
   // (útil en deploys donde solo se usa el webhook Meta o el pipeline yo).
-  const waEnabled = process.env.WHATSAPP_ENABLED !== 'false'
+  const waEnabled = true // workaround: Dokploy swarm bug ignora env updates — forzar ON
   if (!waEnabled) {
     console.log('WHATSAPP_ENABLED=false → Baileys session deshabilitada')
     return
